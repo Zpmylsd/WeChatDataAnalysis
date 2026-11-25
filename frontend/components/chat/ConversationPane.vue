@@ -34,18 +34,6 @@
           </button>
         </div>
         <div class="ml-auto flex shrink-0 items-center gap-2">
-          <button type="button" class="header-btn-icon" aria-label="AI 助手" title="AI 助手" @click="openAiPage">AI</button>
-          <button
-            type="button"
-            class="header-btn-icon"
-            title="添加消息"
-            aria-label="添加消息"
-            @click="openFeatureUnavailableDialog"
-          >
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </button>
           <button
             type="button"
             class="header-btn-icon"
@@ -153,17 +141,6 @@
 
       <MessageList :state="state" />
 
-      <form class="chat-composer" @submit.prevent="openFeatureUnavailableDialog">
-        <textarea
-          class="chat-composer-input"
-          rows="2"
-          aria-label="输入要发送的微信消息"
-        />
-        <div class="chat-composer-toolbar">
-          <button type="submit" class="chat-composer-send">发送</button>
-        </div>
-      </form>
-
       <button
         v-if="showJumpToBottom"
         type="button"
@@ -188,7 +165,6 @@
         <p class="conversation-empty-text text-sm">
           从左侧列表选择联系人查看聊天记录
         </p>
-        <button v-if="selectedAccount" type="button" class="mt-5 rounded-lg border px-4 py-2 text-sm" @click="openAiPage">向全部聊天提问</button>
       </div>
     </div>
 

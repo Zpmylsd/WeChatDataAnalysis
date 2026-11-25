@@ -337,7 +337,7 @@ def parse_pay_xml(xml_str: str, local_id: int) -> Optional[Dict[str, Any]]:
 
 @router.get("/api/biz/proxy_image", summary="代理请求微信服务号图片")
 def proxy_biz_image(url: str):
-    if not url:
+    if not url or urllib.parse.urlparse(url).scheme not in {"http", "https"}:
         return Response(status_code=400)
     try:
         req = urllib.request.Request(url, headers={

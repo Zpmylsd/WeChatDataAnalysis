@@ -48,11 +48,6 @@ from ..export_integrity import (
     write_file_integrity_sidecars,
     write_protected_html_file,
 )
-from ..native_core_export import (
-    decode_export_content_key,
-    encrypt_export_file_and_remove_source,
-    erase_export_content_key,
-)
 from ..xlsx_export import build_xlsx_workbook
 from ..wcdb_realtime import (
     WCDB_REALTIME,
@@ -369,8 +364,10 @@ def _normalize_contacts_source(value: Optional[str]) -> str:
 
 
 def _resolve_contacts_source_for_account(source_norm: str, account_dir: Path) -> str:
-    # 新模式：auto 一律走 direct WCDB。旧本地 contact.db/session.db 只在显式 decrypted 时使用。
-    if source_norm == "auto" and account_prefers_decrypted_snapshot(account_dir):
+    if source_norm == "auto" and (
+        account_prefers_decrypted_snapshot(account_dir)
+        or (account_dir / "contact.db").is_file()
+    ):
         return "decrypted"
     if source_norm == "auto":
         return "realtime"
@@ -2936,25 +2933,7 @@ def export_chat_contacts(request: Request, req: ContactExportRequest):
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_account = _safe_export_part(account_dir.name)
     extension = "xlsx" if fmt == "excel" else fmt
-    encrypted_requested = bool(req.encrypt)
-    requested_output_path = output_dir / f"contacts_{safe_account}_{ts}.{extension}"
-    plaintext_output_path = (
-        requested_output_path.with_name(
-            f".{requested_output_path.name}.{export_id}.plain"
-        )
-        if encrypted_requested
-        else requested_output_path
-    )
-    output_path = plaintext_output_path
-    encrypted_output_path: Path | None = None
-
-    try:
-        content_key = decode_export_content_key(
-            req.content_key_base64.get_secret_value() if req.content_key_base64 else None,
-            enabled=bool(req.encrypt),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    output_path = output_dir / f"contacts_{safe_account}_{ts}.{extension}"
 
     try:
         if fmt == "json":
@@ -3001,32 +2980,8 @@ def export_chat_contacts(request: Request, req: ContactExportRequest):
         native_integrity_manifest_path, native_integrity_signature_path = (
             native_file_integrity_sidecar_paths(output_path)
         )
-        if content_key is not None:
-            encrypted_path = requested_output_path.with_name(requested_output_path.name + ".wec")
-            if encrypted_path.exists():
-                encrypted_path = requested_output_path.with_name(
-                    f"{requested_output_path.stem}_{export_id}{requested_output_path.suffix}.wec"
-                )
-            encrypted_output_path = encrypted_path
-            encrypt_export_file_and_remove_source(
-                plaintext_output_path,
-                encrypted_path,
-                export_id=export_id,
-                content_key=content_key,
-                overwrite=False,
-            )
-            remove_file_export_artifacts(plaintext_output_path, export_id)
-            output_path = encrypted_path
     except Exception as e:
-        if encrypted_requested:
-            try:
-                remove_file_export_artifacts(plaintext_output_path, export_id)
-            finally:
-                if encrypted_output_path is not None:
-                    encrypted_output_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Failed to export contacts: {e}")
-    finally:
-        erase_export_content_key(content_key)
 
     return {
         "status": "success",

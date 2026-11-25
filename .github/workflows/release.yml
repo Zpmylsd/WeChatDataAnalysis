@@ -1,97 +1,101 @@
-name: Publish prebuilt packages
+name: Build Windows EXE & Publish Release
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 高级版安装包的实际四段版本号
-        required: true
-        type: string
-      platform:
-        description: 安装包平台
-        required: true
-        type: choice
-        options: [windows, windows-arm64, macos, linux-x64, linux-arm64, desktop-all, linux-all]
-      links_only:
-        description: 仅在 Release 提供官方直链，不下载或上传包体
+        description: Release 版本号（例如 v2.10.1-local）
         required: false
-        type: boolean
-        default: false
-      source_run_id:
-        description: 高级版构建的 Actions run ID
-        required: false
+        default: "v2.10.1-local"
         type: string
-      artifact_name:
-        description: 该构建已上传的安装包 artifact 名称
-        required: false
-        type: string
-      download_url:
-        description: dl.fqyw.love/desktop-updates 下与版本和平台一致的官方成品直链
-        required: false
-        type: string
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
 
 jobs:
-  publish:
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+  build-windows:
+    runs-on: windows-latest
     steps:
-      - name: Validate package source
-        env:
-          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
-          ARTIFACT_NAME: ${{ inputs.artifact_name }}
-          DOWNLOAD_URL: ${{ inputs.download_url }}
-          LINKS_ONLY: ${{ inputs.links_only }}
-          RELEASE_PLATFORM: ${{ inputs.platform }}
-        run: |
-          if [[ "$LINKS_ONLY" == "true" ]]; then
-            if [[ -n "$SOURCE_RUN_ID" || -n "$ARTIFACT_NAME" || -n "$DOWNLOAD_URL" ]]; then
-              echo "::error::links_only 不接受 source_run_id、artifact_name 或 download_url"
-              exit 1
-            fi
-          elif [[ "$RELEASE_PLATFORM" == "desktop-all" || "$RELEASE_PLATFORM" == "linux-all" ]]; then
-            echo "::error::平台组仅可在 links_only 模式使用"
-            exit 1
-          elif [[ -n "$DOWNLOAD_URL" ]]; then
-            if [[ -n "$SOURCE_RUN_ID" || -n "$ARTIFACT_NAME" ]]; then
-              echo "::error::download_url 与 source_run_id/artifact_name 只能选择一种来源"
-              exit 1
-            fi
-          elif [[ -z "$SOURCE_RUN_ID" || -z "$ARTIFACT_NAME" ]]; then
-            echo "::error::请填写 download_url，或同时填写 source_run_id 和 artifact_name"
-            exit 1
-          fi
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Checkout publication script
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          persist-credentials: false
+          node-version: "22"
 
-      - name: Download existing Advanced package
-        if: inputs.links_only != true && inputs.download_url == ''
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          repository: ${{ vars.WDA_ADVANCED_REPOSITORY || 'woijfwefw/WCDB-Advanced' }}
-          run-id: ${{ inputs.source_run_id }}
-          name: ${{ inputs.artifact_name }}
-          github-token: ${{ secrets.WCE_NATIVE_CORE_PRODUCER_TOKEN }}
-          path: release-assets
+          python-version: "3.12"
 
-      - name: Publish package with API release notes
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CHANGELOG_URL: ${{ secrets.CHANGELOG_URL }}
-          RELEASE_VERSION: ${{ inputs.version }}
-          RELEASE_PLATFORM: ${{ inputs.platform }}
-          DOWNLOAD_URL: ${{ inputs.download_url }}
-          LINKS_ONLY: ${{ inputs.links_only }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install frontend & desktop dependencies
         run: |
-          args=(--version "$RELEASE_VERSION" --platform "$RELEASE_PLATFORM" --assets release-assets --publish)
-          if [[ "$LINKS_ONLY" == "true" ]]; then
-            args+=(--links-only)
-          elif [[ -n "$DOWNLOAD_URL" ]]; then
-            args+=(--download-url "$DOWNLOAD_URL")
-          fi
-          python3 tools/publish-desktop-release.py "${args[@]}"
+          npm --prefix frontend ci
+          npm --prefix desktop ci
+
+      - name: Build frontend static UI
+        run: |
+          npm --prefix desktop run build:ui
+
+      - name: Build pure-Python backend EXE (PyInstaller)
+        run: |
+          npm --prefix desktop run build:backend
+
+      - name: Build Windows Setup EXE (electron-builder)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npm --prefix desktop run build:icon
+          npx --prefix desktop electron-builder --win --x64 --publish never
+
+      - name: Stage release EXE artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-exe | Out-Null
+          Get-ChildItem desktop/dist/*.exe | Copy-Item -Destination release-exe/ -Force
+          if (Test-Path desktop/resources/backend/wechat-backend.exe) {
+            Copy-Item desktop/resources/backend/wechat-backend.exe release-exe/wechat-backend.exe -Force
+          }
+          Get-ChildItem release-exe
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeChatDataAnalysis-windows-x64-exe
+          path: release-exe/*.exe
+
+      - name: Publish to GitHub Releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          $tag = if ($env:REF_TYPE -eq "tag") { $env:REF_NAME } elseif ($env:INPUT_TAG) { $env:INPUT_TAG } else { "v2.10.1-local" }
+          if (-not $tag.StartsWith("v")) { $tag = "v$tag" }
+          $notes = @(
+            "## WeChatDataAnalysis（Windows x64 内网自用去限制版）",
+            "",
+            "- 已解除 45 天硬过期限制与闭源 `native_core` / `wechatdb_broker.exe` 强绑定，默认使用本地已解密 SQLite（`decrypted` 模式）",
+            "- 已移除 `license.fqyw.love` 在线租约校验、4xx 强杀进程与操作遥测上报",
+            "- 已移除 `view.free.c3o.re` 图片密钥回退自动上传 `global_config` 逻辑",
+            "- 已移除 `wce_integrity.pyd` 与 `.wec`/`.wes` 闭源导出封签加密壳，全部导出纯 Python 化（直接生成标准 HTML/CSS 与标准 ZIP）",
+            "- 已移除 WxCDN 付费流量配额及前端所有 PRO 付费推广弹窗与无后端占位按钮"
+          ) -join "`n"
+          $exists = $false
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) { $exists = $true }
+          if ($exists) {
+            gh release upload $tag release-exe/*.exe --clobber
+            gh release edit $tag --title "WeChatDataAnalysis $tag (Windows x64 去限制版)" --notes $notes
+          } else {
+            gh release create $tag release-exe/*.exe --title "WeChatDataAnalysis $tag (Windows x64 去限制版)" --notes $notes
+          }

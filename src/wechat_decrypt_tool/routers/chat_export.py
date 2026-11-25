@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field, SecretStr
 
 from ..chat_export_service import CHAT_EXPORT_MANAGER, get_chat_export_targets_preview
 from ..chat_incremental_export import ChatIncrementalError
-from ..native_core_export import decode_export_content_key, erase_export_content_key
 from ..path_fix import PathFixRoute
 from ..voice_transcription import VoiceTranscriptionError, get_voice_transcription_service
 
@@ -40,7 +39,7 @@ MessageType = Literal[
 
 class ChatExportCreateRequest(BaseModel):
     account: Optional[str] = Field(None, description="账号目录名（可选，默认使用第一个）")
-    source: ChatSource = Field("auto", description="数据源：auto/realtime=直接读取原始 WCDB；decrypted=兼容旧本地解密库")
+    source: ChatSource = Field("auto", description="数据源：auto/decrypted=本地解密库；realtime=实时库")
     scope: ExportScope = Field("selected", description="导出范围：selected=指定会话；all=全部；groups=仅群聊；singles=仅单聊")
     usernames: list[str] = Field(default_factory=list, description="会话 username 列表（scope=selected 时使用）")
     format: ExportFormat = Field("json", description="导出格式：html/json/txt/excel（zip 内每个会话一个文件；Excel 为 .xlsx）")
@@ -75,10 +74,10 @@ class ChatExportCreateRequest(BaseModel):
         description="隐私模式导出：隐藏会话/用户名/内容，不打包头像与媒体",
     )
     file_name: Optional[str] = Field(None, description="导出 zip 文件名（可选，不含/含 .zip 都可）")
-    encrypt: bool = Field(False, description="是否使用 WEC1 加密最终导出文件")
+    encrypt: bool = Field(False, description="已弃用：始终导出标准 ZIP")
     content_key_base64: Optional[SecretStr] = Field(
         None,
-        description="WEC1 的 32 字节 Base64 内容密钥；仅 encrypt=true 时使用",
+        description="已弃用",
     )
     transcribe_voice: bool = Field(False, description="使用本地 Whisper 将语音消息转成中文并写入导出文件")
     output_mode: ExportOutputMode = Field("zip", description="输出方式：zip=全量压缩包；folder=可持续更新目录")
@@ -109,13 +108,6 @@ async def create_chat_export(req: ChatExportCreateRequest):
                 detail={"code": exc.code, "message": exc.user_message},
             ) from exc
     try:
-        content_key = decode_export_content_key(
-            req.content_key_base64.get_secret_value() if req.content_key_base64 else None,
-            enabled=bool(req.encrypt),
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    try:
         job = CHAT_EXPORT_MANAGER.create_job(
             account=req.account,
             source=req.source,
@@ -135,8 +127,8 @@ async def create_chat_export(req: ChatExportCreateRequest):
             html_page_size=req.html_page_size,
             privacy_mode=req.privacy_mode,
             file_name=req.file_name,
-            encrypt=bool(req.encrypt),
-            content_key=content_key,
+            encrypt=False,
+            content_key=None,
             transcribe_voice=req.transcribe_voice,
             output_mode=req.output_mode,
             folder_name=req.folder_name,
@@ -147,14 +139,9 @@ async def create_chat_export(req: ChatExportCreateRequest):
             recheck_media=bool(req.recheck_media),
         )
     except ChatIncrementalError as e:
-        erase_export_content_key(content_key)
         raise HTTPException(status_code=409, detail={"code": e.code, "message": str(e)}) from e
     except ValueError as e:
-        erase_export_content_key(content_key)
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception:
-        erase_export_content_key(content_key)
-        raise
     return {"status": "success", "job": job.to_public_dict()}
 
 

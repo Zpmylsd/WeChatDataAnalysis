@@ -600,12 +600,15 @@ function main() {
   fs.mkdirSync(workDir, { recursive: true });
   fs.mkdirSync(specDir, { recursive: true });
 
-  const integrityNativeBinary = buildIntegrityNativeBinary();
   prepareRuntimeNativeDir(nativeDir, runtimeNativeDir);
-  stageNativeCoreArtifacts();
-  stageMacosXkeyArtifacts({ destinationNativeDir: runtimeNativeDir });
+  if (String(process.env.WCE_NATIVE_CORE_ARTIFACT_DIR || "").trim()) {
+    stageNativeCoreArtifacts();
+  }
+  if (process.platform === "darwin" && String(process.env.WCE_MACOS_DB_KEY_ARTIFACT_DIR || "").trim()) {
+    stageMacosXkeyArtifacts({ destinationNativeDir: runtimeNativeDir });
+  }
   validateRuntimeNativeHelpers(runtimeNativeDir);
-  runIntegrityPreflight(process.env, integrityNativeBinary);
+  runIntegrityPreflight(process.env, null);
 
   const desktopPackageJsonPath = path.join(repoRoot, "desktop", "package.json");
   let desktopVersion = "1.3.0";
@@ -683,14 +686,6 @@ function main() {
       "yara"
     );
   }
-  if (integrityNativeBinary) {
-    args.splice(
-      args.length - 1,
-      0,
-      "--add-binary",
-      pyInstallerAddData(integrityNativeBinary, "wechat_decrypt_tool/native")
-    );
-  }
 
   const result = spawnSync("uv", args, { cwd: repoRoot, stdio: "inherit" });
   if ((result.status ?? 1) !== 0) {
@@ -709,9 +704,6 @@ function main() {
   const packagedNativeDir = path.join(distDir, "native");
   fs.rmSync(packagedNativeDir, { recursive: true, force: true });
   fs.cpSync(runtimeNativeDir, packagedNativeDir, { recursive: true, force: true });
-  if (integrityNativeBinary) {
-    fs.copyFileSync(integrityNativeBinary, path.join(packagedNativeDir, path.basename(integrityNativeBinary)));
-  }
 
   // Historical builds shipped pyproject.toml as a "project root" marker, which let
   // the packaged backend write `.env` into the signed .app bundle and break macOS

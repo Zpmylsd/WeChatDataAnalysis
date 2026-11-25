@@ -8,7 +8,6 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, SecretStr
 
 from ..path_fix import PathFixRoute
-from ..native_core_export import decode_export_content_key, erase_export_content_key
 from ..sns_export_service import SNS_EXPORT_MANAGER
 
 router = APIRouter(route_class=PathFixRoute)
@@ -34,10 +33,10 @@ class SnsExportCreateRequest(BaseModel):
         description="浏览器目录批量核对后发现缺失或大小不一致的受管理文件",
     )
     reset_baseline: bool = Field(False, description="是否忽略旧基线并完整重建")
-    encrypt: bool = Field(False, description="是否使用 WEC1 加密最终导出文件")
+    encrypt: bool = Field(False, description="已弃用：始终导出标准 ZIP")
     content_key_base64: Optional[SecretStr] = Field(
         None,
-        description="WEC1 的 32 字节 Base64 内容密钥；仅 encrypt=true 时使用",
+        description="已弃用",
     )
 
 
@@ -49,33 +48,22 @@ async def create_sns_export(req: SnsExportCreateRequest):
             raise HTTPException(status_code=413, detail="Incremental baseline is too large.")
     if len(req.missing_files) > 100_000:
         raise HTTPException(status_code=413, detail="Too many missing incremental files.")
-    try:
-        content_key = decode_export_content_key(
-            req.content_key_base64.get_secret_value() if req.content_key_base64 else None,
-            enabled=bool(req.encrypt),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    try:
-        job = SNS_EXPORT_MANAGER.create_job(
-            account=req.account,
-            scope=req.scope,
-            usernames=req.usernames,
-            export_format=req.format,
-            use_cache=bool(req.use_cache),
-            output_dir=req.output_dir,
-            file_name=req.file_name,
-            output_mode=req.output_mode,
-            folder_name=req.folder_name,
-            baseline=req.baseline,
-            missing_files=req.missing_files,
-            reset_baseline=bool(req.reset_baseline),
-            encrypt=bool(req.encrypt),
-            content_key=content_key,
-        )
-    except Exception:
-        erase_export_content_key(content_key)
-        raise
+    job = SNS_EXPORT_MANAGER.create_job(
+        account=req.account,
+        scope=req.scope,
+        usernames=req.usernames,
+        export_format=req.format,
+        use_cache=bool(req.use_cache),
+        output_dir=req.output_dir,
+        file_name=req.file_name,
+        output_mode=req.output_mode,
+        folder_name=req.folder_name,
+        baseline=req.baseline,
+        missing_files=req.missing_files,
+        reset_baseline=bool(req.reset_baseline),
+        encrypt=False,
+        content_key=None,
+    )
     return {"status": "success", "job": job.to_public_dict()}
 
 

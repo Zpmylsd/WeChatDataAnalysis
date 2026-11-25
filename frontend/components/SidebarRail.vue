@@ -48,18 +48,6 @@
         </div>
       </div>
 
-      <button
-        type="button"
-        class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center cursor-pointer group"
-        title="AI 助手"
-        aria-label="AI 助手"
-        @click="goAi"
-      >
-        <span class="sidebar-rail-plate w-[var(--sidebar-rail-btn)] h-[var(--sidebar-rail-btn)] rounded-md flex items-center justify-center">
-          <i class="fa-solid fa-wand-magic-sparkles sidebar-rail-icon" :class="{ 'sidebar-rail-icon-active': isAiRoute }" aria-hidden="true"></i>
-        </span>
-      </button>
-
       <!-- Moments -->
       <div
         class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center cursor-pointer group"
@@ -89,20 +77,6 @@
           </div>
         </div>
       </div>
-
-      <!-- Pro 入口：样子照官网开场主按钮「免费试用高级版」，点了在浏览器里打开官网 -->
-      <button
-        type="button"
-        class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center cursor-pointer group"
-        title="Pro · 打开官网"
-        aria-label="Pro：在浏览器中打开官网"
-        @click="openOfficialSite"
-      >
-        <span class="pro-entry" aria-hidden="true">
-          <span class="pro-entry-face"></span>
-          <span class="pro-entry-label">Pro</span>
-        </span>
-      </button>
 
       <!-- Favorites -->
       <div
@@ -526,9 +500,6 @@ const themeToggleTitle = computed(() => {
 })
 
 const { open: settingsDialogOpen, openDialog: openSettingsDialog } = useSettingsDialog()
-// 侧栏「Pro」打开官网：桌面端经主进程交给系统浏览器，网页端开新标签页
-const OFFICIAL_SITE_URL = 'https://wuuud.com/'
-const openOfficialSite = () => { void openMessageExternalUrl(OFFICIAL_SITE_URL) }
 const { getChatAccountInfo, deleteChatAccount } = useApi()
 
 const showGlobalExportEntry = true
@@ -771,7 +742,6 @@ const selectAccountFromDialog = async (account) => {
 }
 
 const isChatRoute = computed(() => route.path?.startsWith('/chat'))
-const isAiRoute = computed(() => route.path === '/ai')
 const isSnsRoute = computed(() => route.path?.startsWith('/sns'))
 const isFavoritesRoute = computed(() => route.path?.startsWith('/favorites'))
 const isContactsRoute = computed(() => route.path?.startsWith('/contacts'))
@@ -782,7 +752,6 @@ const isPaymentsRoute = computed(() => route.path?.startsWith('/payments'))
 const isWrappedRoute = computed(() => route.path?.startsWith('/wrapped'))
 
 const goChat = async () => { await navigateTo('/chat') }
-const goAi = async () => { await navigateTo('/ai') }
 const goSns = async () => { await navigateTo('/sns') }
 const goFavorites = async () => { await navigateTo('/favorites') }
 const goContacts = async () => { await navigateTo('/contacts') }

@@ -989,17 +989,6 @@
       >
         打开文件夹
       </button>
-
-      <template v-if="isLikelyTextMessage(contextMenu.message)">
-        <div class="border-t border-gray-200"></div>
-        <button
-          class="chat-context-menu__item block w-full text-left px-3 py-2"
-          type="button"
-          @click="onEditMessageClick"
-        >
-          修改文字
-        </button>
-      </template>
     </div>
 
     <!-- 导出弹窗 -->

@@ -1142,43 +1142,10 @@ export const useApi = () => {
     })
   }
 
-  const getCdnImageStatus = async (account = '') => {
-    const q = String(account || '').trim()
-    return await request('/system/cdn_image/status' + (q ? `?account=${encodeURIComponent(q)}` : ''))
-  }
-
-  // WxCDN 套餐 / 额度 / 兑换（后端 routers/cdn.py）
-  const getCdnPlan = async (account = '', { refresh = false } = {}) => {
-    const params = new URLSearchParams()
-    if (String(account || '').trim()) params.set('account', String(account).trim())
-    if (refresh) params.set('refresh', 'true')
-    const q = params.toString()
-    return await request('/cdn/plan' + (q ? `?${q}` : ''))
-  }
-  const connectCdn = async (account = '') => {
-    return await request('/cdn/connect', { method: 'POST', body: { account: String(account || '').trim() } })
-  }
-  const redeemCdnCode = async (account, code) => {
-    return await request('/cdn/redeem', { method: 'POST', body: { account: String(account || '').trim(), code: String(code || '') } })
-  }
-
-  const toggleCdnImage = async (enabled) => {
-    return await request('/system/cdn_image/toggle', {
-      method: 'POST',
-      body: { enabled: !!enabled }
-    })
-  }
-
-
   return {
     pickSystemDirectory,
     getImgHelperStatus,
     toggleImgHelper,
-    getCdnImageStatus,
-    toggleCdnImage,
-    getCdnPlan,
-    connectCdn,
-    redeemCdnCode,
     detectWechat,
     detectCurrentAccount,
     decryptDatabase,

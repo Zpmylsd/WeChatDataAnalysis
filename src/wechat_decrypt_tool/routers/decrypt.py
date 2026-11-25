@@ -311,30 +311,6 @@ def _save_db_key_for_account(account: str, key: str, account_result: dict[str, A
             continue
         WCDB_REALTIME.disconnect(candidate)
         invalidated_accounts.append(candidate)
-
-    cache_root = source_db_storage_path
-    if not cache_root and source_wxid_dir:
-        cache_root = str(Path(source_wxid_dir) / "db_storage")
-    if cache_root:
-        try:
-            from ..native_core_realtime import prepare_account_raw_key_cache
-
-            prepared = prepare_account_raw_key_cache(
-                Path(cache_root),
-                key,
-                account=str(account),
-            )
-            logger.info(
-                "[decrypt] prepared encrypted native raw-key cache account=%s databases=%s",
-                str(account),
-                prepared,
-            )
-        except Exception as exc:
-            logger.warning(
-                "[decrypt] native raw-key cache preparation skipped account=%s error=%s",
-                str(account),
-                str(exc).strip() or exc.__class__.__name__,
-            )
     logger.info(
         "[decrypt] saved db key and invalidated realtime connection account=%s aliases=%s source_wxid_dir=%s source_db_storage_path=%s",
         str(account),

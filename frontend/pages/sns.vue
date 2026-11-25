@@ -43,13 +43,6 @@
         <div class="mt-3">
           <button
               type="button"
-              class="mb-2 w-full px-3 py-2.5 rounded-md text-sm border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
-              @click="openAdvancedFeaturesDialog"
-          >
-            发布朋友圈
-          </button>
-          <button
-              type="button"
               class="w-full px-3 py-2.5 rounded-md text-sm border border-gray-200 bg-white hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               :disabled="!isSnsPageMounted || !selectedAccount"
               @click="openExportModal"
@@ -1184,7 +1177,6 @@ const isSnsPageMounted = ref(false)
 const error = ref('')
 const syncWarning = ref('')
 const snsUseCache = ref(true)
-const { openDialog: openAdvancedFeaturesDialog } = useAdvancedFeaturesDialog()
 
 const coverData = ref(null)
 const covers = ref([])

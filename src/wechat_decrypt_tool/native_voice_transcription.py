@@ -95,16 +95,6 @@ _UNAVAILABLE_TRANSPORT = UnavailableNativeVoiceTriggerTransport()
 
 
 def get_native_voice_trigger_transport() -> NativeVoiceTriggerTransport:
-    try:
-        from .native_core_voice_asr import build_native_core_voice_asr_transport
-
-        transport = build_native_core_voice_asr_transport()
-        if transport is not None:
-            return transport
-    except Exception:
-        # Artifact discovery is intentionally fail-closed; trigger-time errors
-        # are surfaced by the real transport as NativeVoiceTriggerError.
-        pass
     return _UNAVAILABLE_TRANSPORT
 
 

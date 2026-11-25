@@ -93,11 +93,6 @@ from .export_integrity import export_css as _native_export_css
 from .export_integrity import load_wce_integrity_native
 from .export_integrity import write_active_html_zip_integrity
 from .export_integrity import write_zip_integrity_sidecars
-from .native_core_export import (
-    encrypt_export_file_and_remove_source,
-    erase_export_content_key,
-)
-from .native_core_telemetry import record_product_event
 from .xlsx_export import build_xlsx_workbook
 from .wcdb_realtime import (
     WCDB_REALTIME,
@@ -1854,7 +1849,6 @@ class ChatExportManager:
             t.start()
         except Exception:
             release_voice_model_activity(voice_activity_key)
-            erase_export_content_key(job.content_key)
             job.content_key = None
             with self._lock:
                 job.status = "error"
@@ -1871,7 +1865,7 @@ class ChatExportManager:
         report_outcome: bool = True,
         voice_activity_key: Optional[str] = None,
     ) -> None:
-        outcome: str | None = None
+        del report_outcome
         try:
             if voice_activity_key is None and bool((job.options or {}).get("transcribeVoice")) and not bool(
                 (job.options or {}).get("privacyMode")
@@ -1887,21 +1881,15 @@ class ChatExportManager:
             if bool((job.options or {}).get("transcribeVoice")) and job.voice_cache_generation is None:
                 job.voice_cache_generation = capture_voice_transcript_cache_generation()
             self._run_job(job, account_dir)
-            if job.status == "done":
-                outcome = "export_completed"
         except Exception as e:
             logger.exception(f"export job failed: {job.export_id}: {e}")
             with self._lock:
                 job.status = "error"
                 job.error = str(e)
                 job.finished_at = time.time()
-            outcome = "export_failed"
         finally:
             release_voice_model_activity(voice_activity_key or "")
-            erase_export_content_key(job.content_key)
             job.content_key = None
-            if report_outcome and outcome is not None:
-                record_product_event(outcome)
 
     def run_prepared_archive(
         self,
@@ -3685,19 +3673,6 @@ class ChatExportManager:
                         f"有 {len(folder_context.unresolved_missing_owner_keys)} 个缺失文件所属会话已不在当前数据源中，将在后续更新时继续尝试补回。"
                     )
                 job.warning = " ".join(warning_parts)
-            elif job.content_key is not None:
-                final_out = final_zip.with_name(final_zip.name + ".wec")
-                if final_out.exists():
-                    final_out = final_out.with_name(
-                        f"{final_zip.stem}_{job.export_id}{final_zip.suffix}.wec"
-                    )
-                encrypted_output_path = final_out
-                encrypt_export_file_and_remove_source(
-                    tmp_zip,
-                    final_out,
-                    export_id=job.export_id,
-                    content_key=job.content_key,
-                )
             else:
                 if final_zip.exists():
                     final_zip = (exports_root / f"{final_zip.stem}_{job.export_id}{final_zip.suffix}").resolve()

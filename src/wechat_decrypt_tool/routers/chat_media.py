@@ -68,7 +68,6 @@ from ..media_helpers import (
     _try_find_decrypted_resource,
     _try_strip_media_prefix,
 )
-from .. import cdn_image_service
 from ..chat_helpers import (
     _decode_message_content,
     _extract_md5_from_packed_info,
@@ -103,7 +102,10 @@ from ..native_voice_transcription import (
     resolve_native_voice_target,
     trigger_native_voice_transcription,
 )
-from ..native_core_voice_asr import native_core_voice_asr_status as native_bridge_status
+
+
+def native_bridge_status(_account_dir=None) -> dict[str, object]:
+    return {"available": False, "reason": "disabled"}
 
 logger = get_logger(__name__)
 
@@ -2688,82 +2690,7 @@ async def get_chat_image(
         )
 
     async def fetch_cdn_original() -> tuple[bytes, str] | None:
-        if not server_id:
-            return None
-        if not fetch_remote and not cdn_image_service.is_cdn_download_enabled():
-            return None
-        try:
-            cdn_info = await asyncio.to_thread(
-                _lookup_image_cdn_download_info,
-                str(account_dir),
-                int(server_id),
-                str(username or ""),
-            )
-        except Exception:
-            cdn_info = {}
-        cdn_fileid = str((cdn_info or {}).get("fileid") or "").strip()
-        cdn_aeskey = str((cdn_info or {}).get("aeskey") or "").strip()
-        if not cdn_fileid:
-            return None
-        try:
-            cdn_started_at = time.perf_counter()
-            cdn_data = await cdn_image_service.download_original_image(
-                account_dir.name,
-                cdn_fileid,
-                aes_key_hex=cdn_aeskey,
-                image_type="orig",
-            )
-            trace(
-                "cdn:download",
-                bytes=len(cdn_data or b""),
-                explicit=bool(fetch_remote),
-                elapsedMsLocal=round((time.perf_counter() - cdn_started_at) * 1000.0, 1),
-            )
-        except cdn_image_service.CdnQuotaExceededError as quota_err:
-            trace("cdn:quota-exceeded", detail=str(quota_err))
-            quota_headers: dict[str, str] | None = None
-            try:
-                resets_at = (quota_err.quota or {}).get("resetsAt")
-                if resets_at is not None:
-                    quota_headers = {"Retry-After": str(max(0, int(int(resets_at) - time.time())))}
-            except (TypeError, ValueError):
-                quota_headers = None
-            raise HTTPException(
-                status_code=429,
-                detail={"code": "quota_exceeded", "message": str(quota_err), "quota": quota_err.quota},
-                headers=quota_headers,
-            )
-        except cdn_image_service.CdnRateLimitedError as rate_err:
-            trace("cdn:rate-limited", detail=str(rate_err))
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "code": "rate_limited",
-                    "message": str(rate_err),
-                    "retryAfterSeconds": rate_err.retry_after,
-                },
-                headers=rate_err.headers() or None,
-            )
-        except cdn_image_service.CdnAccountFrozenError as frozen_err:
-            trace("cdn:account-frozen", detail=str(frozen_err))
-            raise HTTPException(
-                status_code=403,
-                detail={"code": "account_frozen", "message": str(frozen_err)},
-            )
-        except Exception as cdn_err:  # noqa: BLE001
-            trace("cdn:error", error=str(cdn_err)[:200], explicit=bool(fetch_remote))
-            return None
-        if not cdn_data:
-            return None
-        payload, cdn_media_type, _cdn_ext = _detect_media_type_and_ext(cdn_data)
-        if not cdn_media_type.startswith("image/"):
-            cdn_media_type = "image/jpeg"
-        if md5 and _is_valid_md5(str(md5)):
-            try:
-                await asyncio.to_thread(_write_cached_chat_image, account_dir, str(md5), payload)
-            except Exception:
-                pass
-        return payload, cdn_media_type
+        return None
 
     p: Optional[Path] = None
     candidates: list[Path] = []

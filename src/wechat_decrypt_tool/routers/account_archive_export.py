@@ -16,12 +16,6 @@ from pydantic import BaseModel, Field, SecretStr
 
 from ..chat_helpers import _resolve_account_dir
 from ..export_integrity import IntegrityZipWriter, write_zip_integrity_sidecars
-from ..native_core_export import (
-    decode_export_content_key,
-    encrypt_export_file_and_remove_source,
-    erase_export_content_key,
-)
-from ..native_core_telemetry import record_product_event
 from ..path_fix import PathFixRoute
 
 router = APIRouter(route_class=PathFixRoute)
@@ -454,15 +448,7 @@ def _run_account_archive_export(export_id: str, payload: dict[str, Any]) -> None
         _update_job(export_id, progress=97, message="Finalizing ZIP archive...", detail="Moving archive to target folder.")
         if final_path.exists():
             final_path.unlink()
-        if job.content_key is not None:
-            encrypt_export_file_and_remove_source(
-                tmp_path,
-                final_path,
-                export_id=export_id,
-                content_key=job.content_key,
-            )
-        else:
-            shutil.move(str(tmp_path), str(final_path))
+        shutil.move(str(tmp_path), str(final_path))
 
         _update_job(
             export_id,
@@ -477,7 +463,6 @@ def _run_account_archive_export(export_id: str, payload: dict[str, Any]) -> None
             zip_path=str(final_path),
             file_name=final_path.name,
         )
-        record_product_event("export_completed")
     except AccountArchiveCancelled:
         try:
             if tmp_path is not None and tmp_path.exists():
@@ -492,9 +477,7 @@ def _run_account_archive_export(export_id: str, payload: dict[str, Any]) -> None
         except Exception:
             pass
         _update_job(export_id, status="error", error=str(exc), message="Export failed.", detail="")
-        record_product_event("export_failed")
     finally:
-        erase_export_content_key(job.content_key)
         job.content_key = None
 
 
@@ -502,14 +485,6 @@ def _run_account_archive_export(export_id: str, payload: dict[str, Any]) -> None
 async def export_account_archive(req: AccountArchiveExportRequest):
     if not req.include_databases and not req.include_resources:
         raise HTTPException(status_code=400, detail="Please select at least one export option.")
-
-    try:
-        content_key = decode_export_content_key(
-            req.content_key_base64.get_secret_value() if req.content_key_base64 else None,
-            enabled=bool(req.encrypt),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     payload = {
         "account": req.account,
@@ -521,8 +496,8 @@ async def export_account_archive(req: AccountArchiveExportRequest):
     export_id = uuid.uuid4().hex
     job = AccountArchiveExportJob(
         export_id=export_id,
-        encrypted=bool(req.encrypt),
-        content_key=content_key,
+        encrypted=False,
+        content_key=None,
     )
     with _JOBS_LOCK:
         _JOBS[export_id] = job
@@ -533,7 +508,6 @@ async def export_account_archive(req: AccountArchiveExportRequest):
     except Exception:
         with _JOBS_LOCK:
             _JOBS.pop(export_id, None)
-        erase_export_content_key(content_key)
         raise
     return {"status": "success", "job": job.to_public_dict()}
 

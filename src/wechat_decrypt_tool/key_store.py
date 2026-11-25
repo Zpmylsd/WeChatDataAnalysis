@@ -37,15 +37,8 @@ def _stored_db_storage_path(item: Any) -> str:
 
 
 def _purge_native_raw_key_cache_roots(roots: Iterable[str]) -> None:
-    try:
-        from .native_core_raw_key_cache import remove_cache_for_root
-    except Exception:
-        return
-    for root in roots:
-        try:
-            remove_cache_for_root(Path(root))
-        except Exception:
-            pass
+    del roots
+    return
 
 
 def _normalize_account_aliases(*values: Optional[str], aliases: Optional[Iterable[str]] = None) -> list[str]:

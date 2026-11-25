@@ -3013,15 +3013,10 @@ class VoiceTranscriptionBatchManager:
                         release_voice_model_activity(activity_key)
                     raise
             else:
-                from .native_core_voice_asr import native_core_voice_asr_status
-
-                native_status = native_core_voice_asr_status(Path(account_dir))
-                if not native_status.get("available"):
-                    reason = str(native_status.get("reason") or "bridge_unavailable")
-                    raise VoiceTranscriptionError(
-                        "native_not_ready",
-                        f"微信原生语音转文字当前不可用（{reason}）。",
-                    )
+                raise VoiceTranscriptionError(
+                    "native_not_ready",
+                    "微信原生语音转文字桥接已禁用，请使用本地开源语音转写模型（Whisper / Qwen / SenseVoice）。",
+                )
             job_id = f"voice-batch-{uuid.uuid4().hex}"
             job = {
                 "jobId": job_id,

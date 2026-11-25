@@ -1,5 +1,4 @@
 import { nextTick, ref, toRaw } from 'vue'
-import { useAdvancedFeaturesDialog } from '~/composables/useAdvancedFeaturesDialog'
 import { showErrorAlert } from '~/composables/useErrorNotice'
 
 const CONTEXT_MENU_MARGIN = 8
@@ -21,7 +20,6 @@ export const useChatEditing = ({
 }) => {
   const contextMenu = ref(initialContextMenu())
   const contextMenuElement = ref(null)
-  const { openDialog: openFeatureUnavailableDialog } = useAdvancedFeaturesDialog()
 
   const closeContextMenu = () => {
     contextMenu.value = initialContextMenu()
@@ -214,13 +212,6 @@ export const useChatEditing = ({
     }
   }
 
-  const onEditMessageClick = () => {
-    const message = contextMenu.value.message
-    closeContextMenu()
-    if (!isLikelyTextMessage(message)) return
-    openFeatureUnavailableDialog()
-  }
-
   const onLocateQuotedMessageClick = async () => {
     const message = contextMenu.value.message
     if (!message?.quoteServerId) return
@@ -235,14 +226,12 @@ export const useChatEditing = ({
     contextMenu,
     contextMenuElement,
     closeContextMenu,
-    openFeatureUnavailableDialog,
     openMediaContextMenu,
     isLikelyTextMessage,
     copyTextToClipboard,
     onCopyMessageTextClick,
     onCopyMessageJsonClick,
     onOpenFolderClick,
-    onEditMessageClick,
     onLocateQuotedMessageClick
   }
 }

@@ -21,11 +21,6 @@ from ..export_integrity import (
     write_file_integrity_sidecars,
     write_protected_html_file,
 )
-from ..native_core_export import (
-    decode_export_content_key,
-    encrypt_export_file_and_remove_source,
-    erase_export_content_key,
-)
 from ..xlsx_export import build_xlsx_workbook
 from .biz import get_biz_messages, get_wechat_pay_records
 from .favorites import list_favorites
@@ -804,13 +799,6 @@ def export_records(request: Request, req: RecordExportRequest):
             }
         ]
         try:
-            content_key = decode_export_content_key(
-                req.content_key_base64.get_secret_value() if req.content_key_base64 else None,
-                enabled=bool(req.encrypt),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        try:
             job = export_prepared_chat_archive(
                 account=account or req.account,
                 output_dir=output_dir,
@@ -821,13 +809,11 @@ def export_records(request: Request, req: RecordExportRequest):
                 include_media=True,
                 media_kinds=["image", "emoji", "video", "video_thumb", "voice", "file"],
                 message_types=sorted(selected_types),
-                encrypt=bool(req.encrypt),
-                content_key=content_key,
+                encrypt=False,
+                content_key=None,
             )
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to export favorites: {exc}") from exc
-        finally:
-            erase_export_content_key(content_key)
         if job.status != "done" or not job.zip_path:
             raise HTTPException(status_code=500, detail=job.error or "Failed to export favorites archive.")
         return {
@@ -835,7 +821,7 @@ def export_records(request: Request, req: RecordExportRequest):
             "account": account,
             "dataset": req.dataset,
             "format": req.format,
-            "dataSource": _clean_text(source_response.get("dataSource")) or "realtime",
+            "dataSource": _clean_text(source_response.get("dataSource")) or "decrypted",
             "outputPath": str(job.zip_path),
             "count": len(items),
             "messagesExported": int(job.progress.messages_exported or 0),
@@ -850,7 +836,7 @@ def export_records(request: Request, req: RecordExportRequest):
         "account": account,
         "username": _clean_text(req.username),
         "subjectName": _clean_text(req.subject_name),
-        "dataSource": _clean_text(source_response.get("dataSource")) or "realtime",
+        "dataSource": _clean_text(source_response.get("dataSource")) or "decrypted",
         "database": _clean_text(source_response.get("database")),
         "query": _clean_text(req.query),
         "types": sorted(selected_types),
@@ -865,24 +851,7 @@ def export_records(request: Request, req: RecordExportRequest):
     stem = _safe_file_stem(req.file_name, default_stem)
     extension = "xlsx" if req.format == "excel" else req.format
     export_id = uuid.uuid4().hex
-    encrypted_requested = bool(req.encrypt)
-    requested_output_path = output_dir / f"{stem}.{extension}"
-    plaintext_output_path = (
-        requested_output_path.with_name(
-            f".{requested_output_path.name}.{export_id}.plain"
-        )
-        if encrypted_requested
-        else requested_output_path
-    )
-    output_path = plaintext_output_path
-    encrypted_output_path: Path | None = None
-    try:
-        content_key = decode_export_content_key(
-            req.content_key_base64.get_secret_value() if req.content_key_base64 else None,
-            enabled=bool(req.encrypt),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    output_path = output_dir / f"{stem}.{extension}"
     try:
         if req.format == "json":
             content = json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n"
@@ -900,32 +869,8 @@ def export_records(request: Request, req: RecordExportRequest):
         native_integrity_manifest_path, native_integrity_signature_path = (
             native_file_integrity_sidecar_paths(output_path)
         )
-        if content_key is not None:
-            encrypted_path = requested_output_path.with_name(requested_output_path.name + ".wec")
-            if encrypted_path.exists():
-                encrypted_path = requested_output_path.with_name(
-                    f"{requested_output_path.stem}_{export_id}{requested_output_path.suffix}.wec"
-                )
-            encrypted_output_path = encrypted_path
-            encrypt_export_file_and_remove_source(
-                plaintext_output_path,
-                encrypted_path,
-                export_id=export_id,
-                content_key=content_key,
-                overwrite=False,
-            )
-            remove_file_export_artifacts(plaintext_output_path, export_id)
-            output_path = encrypted_path
     except Exception as exc:
-        if encrypted_requested:
-            try:
-                remove_file_export_artifacts(plaintext_output_path, export_id)
-            finally:
-                if encrypted_output_path is not None:
-                    encrypted_output_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Failed to export records: {exc}") from exc
-    finally:
-        erase_export_content_key(content_key)
 
     return {
         "status": "success",

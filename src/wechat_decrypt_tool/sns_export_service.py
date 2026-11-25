@@ -34,8 +34,6 @@ from .export_integrity import (
     write_active_html_zip_integrity,
     write_zip_integrity_sidecars,
 )
-from .native_core_export import encrypt_export_file_and_remove_source, erase_export_content_key
-from .native_core_telemetry import record_product_event
 from .xlsx_export import build_xlsx_workbook
 
 # Reuse wxemoji mapping and static asset copying from chat export.
@@ -1676,7 +1674,6 @@ class SnsExportManager:
                 job.status = "error"
                 job.error = str(e)
                 job.finished_at = time.time()
-            outcome = "export_failed"
             if tmp_zip is not None:
                 try:
                     tmp_zip.unlink(missing_ok=True)
@@ -1684,10 +1681,7 @@ class SnsExportManager:
                     pass
             self.commit_staged_files(job.export_id)
         finally:
-            erase_export_content_key(job.content_key)
             job.content_key = None
-            if outcome is not None:
-                record_product_event(outcome)
 
     def _run_job(self, job: ExportJob, account_dir: Path) -> Path:
         with self._lock:
@@ -3550,24 +3544,11 @@ class SnsExportManager:
             except Exception:
                 pass
 
-        if job.content_key is not None:
-            final_out = final_zip.with_name(final_zip.name + ".wec")
-            if final_out.exists():
-                final_out = final_out.with_name(
-                    f"{final_zip.stem}_{job.export_id}{final_zip.suffix}.wec"
-                )
-            encrypt_export_file_and_remove_source(
-                tmp_zip,
-                final_out,
-                export_id=job.export_id,
-                content_key=job.content_key,
-            )
-        else:
-            try:
-                os.replace(str(tmp_zip), str(final_zip))
-                final_out = final_zip
-            except Exception:
-                final_out = tmp_zip
+        try:
+            os.replace(str(tmp_zip), str(final_zip))
+            final_out = final_zip
+        except Exception:
+            final_out = tmp_zip
 
         if output_mode == "folder":
             try:

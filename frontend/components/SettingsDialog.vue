@@ -25,7 +25,7 @@
             type="button"
             class="group flex w-full flex-col items-start rounded-[6px] px-3 py-1.5 text-left transition select-none"
             :class="activeSection === item.key ? 'bg-[var(--app-accent)]' : 'hover:bg-[#f0f0f0]/60'"
-            @click="item.key === 'ai' ? openAiFeatures() : scrollToSection(item.key)"
+            @click="scrollToSection(item.key)"
           >
             <div class="text-[12px] font-medium" :class="activeSection === item.key ? 'text-white' : 'text-[#777] group-hover:text-[#333]'">
               {{ item.label }}
@@ -250,14 +250,6 @@
                 <ErrorNotice v-if="desktopLogFileError" :message="desktopLogFileError" compact manual class="mt-1.5 text-[11px] text-red-600" />
               </div>
             </div>
-          </section>
-
-          <section ref="aiSectionRef">
-            <div class="mb-2.5 text-[12px] font-bold tracking-widest text-[var(--app-text-muted)]">AI 助手</div>
-            <button type="button" class="flex w-full items-center justify-between gap-4 rounded-[10px] border border-[var(--app-border)] bg-[var(--app-surface-bg)] px-3.5 py-3 text-left" @click="openAiFeatures">
-              <span><span class="block text-[13px] font-medium text-[var(--app-text-primary)]">高级版 AI 服务</span><span class="mt-0.5 block text-[11px] text-[var(--app-text-muted)]">聊天问答、内容总结与消息出处</span></span>
-              <span class="shrink-0 text-[12px] text-[var(--app-accent)]">了解高级版</span>
-            </button>
           </section>
 
           <section ref="voiceSectionRef">
@@ -576,45 +568,6 @@
             </div>
           </section>
 
-          <section ref="mediaSectionRef">
-            <div class="mb-2.5 text-[12px] font-bold text-[#999] tracking-widest">聊天与媒体</div>
-            <div class="overflow-hidden rounded-[10px] border border-[#e7e7e7] bg-white divide-y divide-[#ececec]">
-              <div class="px-3.5 py-3">
-                <div class="flex items-center justify-between gap-3">
-                  <div class="min-w-0 flex-1">
-                    <div class="text-[13px] font-medium text-[#222]">自动获取原图</div>
-                    <div class="mt-0.5 text-[11px] text-[#909090]">本地缺原图时自动联网拉取原图，按套餐额度计费。关闭后仅显示本地已有图片。</div>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    :aria-checked="cdnImageEnabled"
-                    class="settings-switch shrink-0"
-                    :class="switchTrackClass(cdnImageEnabled, cdnImageLoading)"
-                    @click="toggleCdnImage"
-                  >
-                    <span class="settings-switch-thumb" :class="cdnImageEnabled ? 'translate-x-[20px]' : 'translate-x-0'" />
-                  </button>
-                </div>
-              </div>
-              <div class="px-3.5 py-3">
-                <div class="flex items-center justify-between gap-3">
-                  <div class="min-w-0 flex-1">
-                    <div class="text-[13px] font-medium text-[#222]">套餐与额度</div>
-                    <div class="mt-0.5 text-[11px] text-[#909090]">查看当前版本、剩余额度与重置时间，输入兑换码激活。</div>
-                  </div>
-                  <button
-                    type="button"
-                    class="shrink-0 rounded-[6px] border border-[#e2e2e2] bg-[#fafafa] px-2.5 py-1 text-[12px] text-[#222] transition hover:bg-[#f0f0f0]"
-                    @click="openPlanWindow('manual')"
-                  >
-                    打开套餐
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
-
           <section ref="updatesSectionRef">
             <div class="mb-2.5 text-[12px] font-bold text-[#999] tracking-widest">更新</div>
             <div class="overflow-hidden rounded-[10px] border border-[#e7e7e7] bg-white divide-y divide-[#ececec]">
@@ -698,16 +651,12 @@ const props = defineProps({
 
 const emit = defineEmits(['close'])
 const api = useApi()
-const { openPlanWindow } = usePlanWindow()
-const { openDialog: openAdvancedFeaturesDialog } = useAdvancedFeaturesDialog()
 
 const settingNavItems = [
   { key: 'desktop', label: '桌面行为', hint: '启动 / 关闭 / 端口' },
-  { key: 'ai', label: 'AI 助手', hint: '高级版功能' },
   { key: 'voice', label: '语音转文字', hint: 'CPU / NVIDIA GPU' },
   { key: 'keys', label: '数据库与密钥', hint: '密钥查看 / 复制' },
   { key: 'startup', label: '启动偏好', hint: '默认页面' },
-  { key: 'media', label: '聊天与媒体', hint: '原图获取' },
   { key: 'updates', label: '更新', hint: '版本信息 / 检查更新' },
   { key: 'sns', label: '朋友圈', hint: '图片缓存策略' },
 ]
@@ -717,10 +666,8 @@ const contentScrollRef = ref(null)
 const desktopSectionRef = ref(null)
 const desktopLogFileRef = ref(null)
 const voiceSectionRef = ref(null)
-const aiSectionRef = ref(null)
 const keysSectionRef = ref(null)
 const startupSectionRef = ref(null)
-const mediaSectionRef = ref(null)
 const updatesSectionRef = ref(null)
 const snsSectionRef = ref(null)
 
@@ -735,8 +682,6 @@ const desktopVersionText = computed(() => {
 
 const desktopDefaultToChatWhenData = ref(true)
 
-const cdnImageEnabled = ref(false)
-const cdnImageLoading = ref(false)
 const snsUseCache = ref(true)
 
 const desktopAutoLaunch = ref(false)
@@ -962,11 +907,9 @@ const refreshDesktopOutputDirProgress = async () => {
 
 const sectionElements = computed(() => [
   { key: 'desktop', el: desktopSectionRef.value },
-  { key: 'ai', el: aiSectionRef.value },
   { key: 'voice', el: voiceSectionRef.value },
   { key: 'keys', el: keysSectionRef.value },
   { key: 'startup', el: startupSectionRef.value },
-  { key: 'media', el: mediaSectionRef.value },
   { key: 'updates', el: updatesSectionRef.value },
   { key: 'sns', el: snsSectionRef.value },
 ])
@@ -986,11 +929,6 @@ const scrollToSection = (key) => {
 
 const scrollToFocusTarget = async () => {
   const focusTarget = String(props.focusTarget || '').trim()
-  if (focusTarget === 'ai') {
-    await nextTick()
-    scrollToSection('ai')
-    return
-  }
   if (focusTarget === 'voice') {
     await nextTick()
     scrollToSection('voice')
@@ -1041,11 +979,6 @@ const onContentScroll = () => {
 
 const handleClose = () => {
   emit('close')
-}
-
-const openAiFeatures = () => {
-  handleClose()
-  openAdvancedFeaturesDialog()
 }
 
 const onEscKeydown = (event) => {
@@ -1954,30 +1887,6 @@ const toggleDesktopDefaultToChat = () => {
   writeLocalBoolSetting(DESKTOP_SETTING_DEFAULT_TO_CHAT_KEY, next)
 }
 
-const loadCdnImageStatus = async () => {
-  try {
-    const res = await api.getCdnImageStatus()
-    cdnImageEnabled.value = res?.enabled === true
-  } catch {
-    // 读取失败保持默认关闭
-  }
-}
-
-const toggleCdnImage = async () => {
-  if (cdnImageLoading.value) return
-  const next = !cdnImageEnabled.value
-  cdnImageLoading.value = true
-  cdnImageEnabled.value = next
-  try {
-    const res = await api.toggleCdnImage(next)
-    cdnImageEnabled.value = res?.enabled === true
-  } catch {
-    cdnImageEnabled.value = !next
-  } finally {
-    cdnImageLoading.value = false
-  }
-}
-
 const toggleSnsUseCache = () => {
   const next = !snsUseCache.value
   snsUseCache.value = next
@@ -2042,7 +1951,6 @@ onMounted(async () => {
 
   desktopDefaultToChatWhenData.value = readLocalBoolSetting(DESKTOP_SETTING_DEFAULT_TO_CHAT_KEY, true)
   snsUseCache.value = readLocalBoolSetting(SNS_SETTING_USE_CACHE_KEY, true)
-  void loadCdnImageStatus()
 
   if (props.open) await refreshSettingsDialogData()
 

@@ -10,13 +10,8 @@ const {
   shell,
   session,
 } = require("electron");
-let autoUpdater = null;
-let autoUpdaterLoadError = null;
-try {
-  ({ autoUpdater } = require("electron-updater"));
-} catch (err) {
-  autoUpdaterLoadError = err;
-}
+const autoUpdater = null;
+const autoUpdaterLoadError = null;
 const { spawn, spawnSync } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
@@ -43,21 +38,7 @@ const {
   resolveBackendStartupTimeoutMs,
   shouldRetryBackendOnDifferentPort,
 } = require("./backend-startup.cjs");
-const { applyNativeCoreRuntimePolicy } = require("./native-core-runtime.cjs");
 const { loadWithRedirect, resolveDesktopUiUrl } = require("./renderer-startup.cjs");
-const {
-  ENV_INTEGRITY_NATIVE_PATH,
-  ENV_MACOS_DB_KEY_BUNDLE,
-  ENV_SOURCE_NATIVE_CORE_DIR,
-  applySourceRuntimeEnvironment,
-  ensureSourceNativeCore,
-} = require("./source-native-core-bootstrap.cjs");
-const { resolveNativeCoreRuntimeDir } = require("./native-core-path.cjs");
-const {
-  configurePrivatePkiUpdateVerification,
-  resolvePrivatePkiRuntime,
-} = require("./windows-private-pki-runtime.cjs");
-const { ensureMacosPrivatePkiTrust } = require("./macos-private-pki-runtime.cjs");
 
 const DEFAULT_BACKEND_HOST = "127.0.0.1";
 const LAN_BACKEND_HOST = "0.0.0.0";
@@ -1525,168 +1506,23 @@ function normalizeReleaseNotes(releaseNotes) {
 }
 
 function initAutoUpdater() {
-  if (autoUpdaterInitialized) return;
-  autoUpdaterInitialized = true;
-
-  // Configure auto-updater (align with WeFlow).
-  autoUpdater.autoDownload = false;
-  // Don't install automatically on quit; let the user choose when to restart/install.
-  autoUpdater.autoInstallOnAppQuit = false;
-  autoUpdater.disableDifferentialDownload = true;
-  configurePrivatePkiUpdateVerification(autoUpdater, {
-    isPackaged: app.isPackaged,
-    platform: process.platform,
-    resourcesPath: process.resourcesPath,
-  });
-
-  autoUpdater.on("download-progress", (progress) => {
-    sendToRenderer("app:downloadProgress", progress);
-    const percent = Number(progress?.percent || 0);
-    if (Number.isFinite(percent) && percent > 0) {
-      setWindowProgressBar(Math.max(0, Math.min(1, percent / 100)));
-    }
-  });
-
-  autoUpdater.on("update-downloaded", () => {
-    updateDownloadInProgress = false;
-    updateDownloaded = true;
-    installOnDownload = false;
-    setWindowProgressBar(-1);
-
-    const payload = {
-      version: lastUpdateInfo?.version ? String(lastUpdateInfo.version) : "",
-      releaseNotes: normalizeReleaseNotes(lastUpdateInfo?.releaseNotes),
-    };
-    sendToRenderer("app:updateDownloaded", payload);
-
-    try {
-      // If the window is hidden to tray, show a lightweight hint instead of forcing UI focus.
-      tray?.displayBalloon?.({
-        title: "更新已下载完成",
-        content: "可在弹窗中选择“立即重启安装”，或稍后再安装。",
-      });
-    } catch {}
-  });
-
-  autoUpdater.on("error", (err) => {
-    updateDownloadInProgress = false;
-    installOnDownload = false;
-    updateDownloaded = false;
-    setWindowProgressBar(-1);
-    const message = err?.message || String(err);
-    logMain(`[main] autoUpdater error: ${message}`);
-    sendToRenderer("app:updateError", { message });
-  });
+  return;
 }
 
 function getTransitionUpdateInfo() {
-  if (!app.isPackaged || app.getVersion() !== "2.10.1") return null;
-
-  const downloads = [
-    { platform: "win32", arch: "x64", label: "Windows x64 高级版 2.6.0.1", version: "2.6.0.1", url: "https://dl.fqyw.love/desktop-updates/windows/WeChatDataAnalysis-Advanced-Unlimited-2.6.0.1-Setup.exe" },
-    { platform: "win32", arch: "arm64", label: "Windows ARM64 高级版 2.6.0.1", version: "2.6.0.1", url: "https://dl.fqyw.love/desktop-updates/windows-arm64/WeChatDataAnalysis-Advanced-Unlimited-2.6.0.1-win-arm64-Setup.exe" },
-    { platform: "darwin", arch: "arm64", label: "macOS ARM64 高级版 2.6.0.1", version: "2.6.0.1", url: "https://dl.fqyw.love/desktop-updates/mac/WeChatDataAnalysis-Advanced-Unlimited-2.6.0.1-mac-arm64.dmg" },
-    { platform: "linux", arch: "x64", label: "Linux x64 高级版 1.0.3.0", version: "1.0.3.0", url: "https://dl.fqyw.love/desktop-updates/linux/WeChatDataAnalysis-Web-Unlimited-1.0.3.0-linux-x86_64.tar.gz" },
-    { platform: "linux", arch: "arm64", label: "Linux ARM64 高级版 1.0.3.0", version: "1.0.3.0", url: "https://dl.fqyw.love/desktop-updates/linux/WeChatDataAnalysis-Web-Unlimited-1.0.3.0-linux-arm64.tar.gz" },
-  ];
-  const download = downloads.find((item) => item.platform === process.platform && item.arch === process.arch)
-    || downloads.find((item) => item.platform === process.platform);
-  if (!download) return null;
-
-  return {
-    hasUpdate: true,
-    enabled: true,
-    version: download.version,
-    manualDownloadUrl: download.url,
-    releaseNotes: [
-      "高级版安装包请使用浏览器下载，下载后手动安装。",
-      ...downloads.map((item) => `[${item.label}](${item.url})`),
-    ].join("\n"),
-  };
+  return null;
 }
 
 async function checkForUpdatesInternal() {
-  const enabled = isAutoUpdateEnabled();
-  if (!enabled) return { hasUpdate: false, enabled: false };
-
-  const manualUpdate = getTransitionUpdateInfo();
-  if (manualUpdate) return manualUpdate;
-
-  initAutoUpdater();
-
-  try {
-    const result = await autoUpdater.checkForUpdates();
-    const updateInfo = result?.updateInfo;
-    lastUpdateInfo = updateInfo || null;
-    const latestVersion = updateInfo?.version ? String(updateInfo.version) : "";
-
-    if (result?.isUpdateAvailable && latestVersion) {
-      return {
-        hasUpdate: true,
-        enabled: true,
-        version: latestVersion,
-        releaseNotes: normalizeReleaseNotes(updateInfo?.releaseNotes),
-      };
-    }
-
-    return { hasUpdate: false, enabled: true };
-  } catch (err) {
-    const message = err?.message || String(err);
-    logMain(`[main] checkForUpdates failed: ${message}`);
-    return { hasUpdate: false, enabled: true, error: message };
-  }
+  return { hasUpdate: false, enabled: false };
 }
 
 async function downloadAndInstallInternal() {
-  if (!isAutoUpdateEnabled()) {
-    throw new Error("自动更新已禁用");
-  }
-  const manualUpdate = getTransitionUpdateInfo();
-  if (manualUpdate) {
-    await shell.openExternal(manualUpdate.manualDownloadUrl);
-    return { success: true };
-  }
-  initAutoUpdater();
-
-  if (updateDownloadInProgress) {
-    throw new Error("正在下载更新中，请稍候…");
-  }
-
-  updateDownloadInProgress = true;
-  installOnDownload = true;
-  updateDownloaded = false;
-  setWindowProgressBar(0);
-
-  try {
-    // Ensure update info is up-to-date (downloadUpdate relies on the last check).
-    await autoUpdater.checkForUpdates();
-    await autoUpdater.downloadUpdate();
-    return { success: true };
-  } catch (err) {
-    updateDownloadInProgress = false;
-    installOnDownload = false;
-    setWindowProgressBar(-1);
-    throw err;
-  }
+  throw new Error("自动更新已禁用");
 }
 
 function checkForUpdatesOnStartup() {
-  if (!isAutoUpdateEnabled()) return;
-  if (!app.isPackaged) return; // keep dev noise-free by default
-
-  setTimeout(async () => {
-    const result = await checkForUpdatesInternal();
-    if (!result?.hasUpdate) return;
-
-    const ignored = getIgnoredUpdateVersion();
-    if (ignored && ignored === result.version) return;
-
-    sendToRenderer("app:updateAvailable", {
-      version: result.version,
-      releaseNotes: result.releaseNotes || "",
-      manualDownloadUrl: result.manualDownloadUrl || "",
-    });
-  }, 3000);
+  return;
 }
 
 function getTrayIconPath() {
@@ -1983,47 +1819,11 @@ function getFfmpegPath() {
   }
 }
 
-function getNativeCoreRuntimeDir(env = process.env) {
-  // dev.cjs performs this preflight before spawning the frontend. Keep this
-  // fallback for direct `electron .` and dev:static source launches.
-  if (
-    !app.isPackaged &&
-    (
-      (
-        process.platform === "darwin" &&
-        (
-          !String(env[ENV_SOURCE_NATIVE_CORE_DIR] || "").trim() ||
-          !String(env[ENV_MACOS_DB_KEY_BUNDLE] || "").trim() ||
-          !String(env[ENV_INTEGRITY_NATIVE_PATH] || "").trim()
-        )
-      ) ||
-      (
-        process.platform === "win32" &&
-        !String(env[ENV_SOURCE_NATIVE_CORE_DIR] || "").trim()
-      )
-    )
-  ) {
-    const sourceNativeCore = ensureSourceNativeCore({ env });
-    applySourceRuntimeEnvironment(env, sourceNativeCore);
-  }
-  return resolveNativeCoreRuntimeDir({
-    env,
-    isPackaged: app.isPackaged,
-    repoRoot: repoRoot(),
-    resourcesPath: process.resourcesPath,
-  });
-}
-
 function configureNativeCoreRuntime(env) {
-  const policy = applyNativeCoreRuntimePolicy(env, {
-    isPackaged: app.isPackaged,
-    nativeDir: getNativeCoreRuntimeDir(env),
-    platform: process.platform,
-  });
-  logMain(
-    `[native-core] mode=${policy.mode} source=${policy.reason} artifacts=${policy.artifactState} packaged=${app.isPackaged}`
-  );
-  return policy;
+  if (env) {
+    env.WECHAT_TOOL_NATIVE_CORE_MODE = "disabled";
+  }
+  return { mode: "disabled", reason: "local-decrypted-sqlite", artifactState: "disabled" };
 }
 
 function clearLegacyWcdbEnvironment(targetEnv = process.env) {
@@ -3320,18 +3120,6 @@ async function ensureMainWindowReady() {
 
 async function main() {
   await app.whenReady();
-  if (app.isPackaged && process.platform === "win32") {
-    resolvePrivatePkiRuntime(process.resourcesPath);
-  }
-  if (app.isPackaged && process.platform === "darwin") {
-    const evidence = ensureMacosPrivatePkiTrust({
-      executablePath: process.execPath,
-      resourcesPath: process.resourcesPath,
-    });
-    logMain(
-      `[private-pki] macos userTrust=${evidence.alreadyTrusted ? "cached" : "installed"} root=${evidence.rootSha256.slice(0, 12)} verifiedTargets=${evidence.verifiedTargetCount}`
-    );
-  }
   await refreshRendererCacheForPackagedUi();
   Menu.setApplicationMenu(null);
   registerWindowIpc();
@@ -3347,9 +3135,6 @@ async function main() {
   logMain(`[main] app.isPackaged=${app.isPackaged} argv=${JSON.stringify(process.argv)}`);
 
   await ensureMainWindowReady();
-
-  // Auto-check updates once after the first UI load (packaged builds only).
-  checkForUpdatesOnStartup();
 }
 
 app.on("window-all-closed", () => {

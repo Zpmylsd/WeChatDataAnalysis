@@ -48,19 +48,19 @@
 ## 三、待删除的无用付费内容与 Windows 端去限制修改清单
 
 ### 3.1 删除付费推广 UI 与无后端占位入口（前端）
-- [ ] 删除 PRO 演示与推广组件：
+- [x] 删除 PRO 演示与推广组件：
   - `frontend/components/AdvancedFeaturesDialog.vue`
   - `frontend/lib/pro-demos/`（整目录，123 项演示动画）
   - `frontend/lib/developer-support.js`（TG 买断链接）
   - 全局清理 `openAdvancedFeaturesDialog` / `openFeatureUnavailableDialog` 引用及 `frontend/app.vue` 中的挂载
-- [ ] 删除侧边栏 Pro 按钮与跳转：`frontend/components/SidebarRail.vue` (L94-L105, L530-L531)
-- [ ] 删除 WxCDN 套餐与兑换码 UI：
+- [x] 删除侧边栏 Pro 按钮与跳转：`frontend/components/SidebarRail.vue` (L94-L105, L530-L531)
+- [x] 删除 WxCDN 套餐与兑换码 UI：
   - `frontend/components/PlanWindow.vue`
   - `frontend/stores/cdnPlan.js`
   - `frontend/lib/wxcdn-card/`（整目录）
   - `frontend/components/SettingsDialog.vue` (L579-L616，WxCDN 设置区块)
   - `frontend/app.vue` (L22 `PlanWindow` 引用)
-- [ ] 清理无后端实现的占位入口（后续自己开发哪个再重新加回）：
+- [x] 清理无后端实现的占位入口（后续自己开发哪个再重新加回）：
   - `frontend/pages/ai.vue` + `SidebarRail.vue` (L51-L61) + `SettingsDialog.vue` (L28, L255-L261, L702, L1048)
   - `frontend/components/chat/ConversationPane.vue` (L38-L48 “添加消息”按钮、L156-L165 “发送”输入框)
   - `frontend/components/chat/ChatOverlays.vue` (L993-L1002 “修改文字”) + `frontend/composables/chat/useChatEditing.js` (L24, L217-L222)
@@ -68,23 +68,23 @@
 - [ ] （可选）删除官网宣传目录 `website/`
 
 ### 3.2 切断外部上传、遥测与 WxCDN（后端）
-- [ ] `src/wechat_decrypt_tool/key_service.py`：删掉 L1314-L1335 远程回退调用和 L1428-L1517 `fetch_and_save_remote_keys()`，确保不再上传 `global_config` 到 `view.free.c3o.re`。
-- [ ] `src/wechat_decrypt_tool/api.py`：删掉 L83-L125 的 `_record_content_free_product_events` 遥测中间件，注销 `cdn` 路由。
-- [ ] 删除 WxCDN 后端代码：
+- [x] `src/wechat_decrypt_tool/key_service.py`：删掉 L1314-L1335 远程回退调用和 L1428-L1517 `fetch_and_save_remote_keys()`，确保不再上传 `global_config` 到 `view.free.c3o.re`。
+- [x] `src/wechat_decrypt_tool/api.py`：删掉 L83-L125 的 `_record_content_free_product_events` 遥测中间件，注销 `cdn` 路由。
+- [x] 删除 WxCDN 后端代码：
   - `src/wechat_decrypt_tool/cdn_image_service.py`
   - `src/wechat_decrypt_tool/routers/cdn.py`
   - `src/wechat_decrypt_tool/routers/system.py` (L82-L115 CDN 配置读写)
   - `src/wechat_decrypt_tool/routers/chat_media.py` (L2690-L2766 CDN 远程拉图回退)
 
 ### 3.3 解除 Windows 端 45 天硬过期与闭源组件强绑定（核心控制权回收）
-- [ ] **导出纯 Python 化（移除 `wce_integrity.pyd` 与 `native_core_export`）**：
+- [x] **导出纯 Python 化（移除 `wce_integrity.pyd` 与 `native_core_export`）**：
   - 重写 `src/wechat_decrypt_tool/export_integrity.py`，用纯 Python CSS/HTML 模板 + 标准 `zipfile` 替代 `wce_integrity.pyd` 和 `seal_export_manifest()`。
   - 移除 `chat_export_service.py` (L3636, L3695)、`sns_export_service.py` (L3536, L3559)、`routers/record_export.py` (L773, L910)、`routers/chat_contacts.py` (L2889, L3011)、`routers/account_archive_export.py` (L451, L458) 中的 `.wec` 闭源加密壳调用（直接导出标准 ZIP 即可）。
   - 删除 `src/wechat_decrypt_tool/native/wce_integrity.pyd` 与 `tools/build_wce_integrity.ps1`。
-- [ ] **数据源默认走已解密 SQLite（摆脱 `wechatdb_broker.exe` 与 45 天过期）**：
+- [x] **数据源默认走已解密 SQLite（摆脱 `wechatdb_broker.exe` 与 45 天过期）**：
   - 修改 `src/wechat_decrypt_tool/source_fallback.py` 与 `account_source_policy.py`，默认使用 `decrypted`（由仓库内开源的 `wechat_decrypt.py` 解密出的本地 SQLite，永久有效、可任意读写扩展）。
   - 移除 `native_core_client.py`、`native_core_lease.py`、`native_core_telemetry.py`、`native_core_device_credential.py`、`native_core_broker.py`、`native_core_database.py`、`native_core_realtime.py`、`native_core_export.py`、`native_core_voice_asr.py`、`wcdb_realtime.py` 的强依赖。
-- [ ] **Windows 桌面端去闭源引导**：
+- [x] **Windows 桌面端去闭源引导**：
   - 在 `desktop/src/main.cjs` 中移除 `windows-source-native-core-bootstrap.cjs`、`native-core-runtime.cjs`、`windows-private-pki-runtime.cjs` 调用，并关闭 `electron-updater` 自动更新与 `dl.fqyw.love` 链接。
   - 语音转文字保留并默认使用开源的 `voice_transcription.py`（Whisper / Qwen / SenseVoice），移除仅限微信 `4.1.12.26` 的 `native_voice_transcription.py` 入口。
   - Windows 密钥提取继续使用现有的 `dll_key_scan.py`、`image_key_memory_scan.py` 和 `tools/key_wheels/wx_key-*.whl`（开源项目 `H3CoF6/py_wx_key`）。

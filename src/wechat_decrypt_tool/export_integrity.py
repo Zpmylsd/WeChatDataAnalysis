@@ -3,101 +3,207 @@ from __future__ import annotations
 import base64
 import hashlib
 import html
-import importlib.machinery
-import importlib.util
 import json
-import os
 import re
-import sys
 import zipfile
-import platform
 from pathlib import Path
 from typing import Any, Iterable
 
-from .native_core_export import seal_export_manifest
+from .export_html_assets import EXPORT_STYLESHEETS, RUNTIME_JS_SOURCE
 
 
 _NATIVE_ERROR = "导出完整性组件初始化失败。"
+_GATE_STYLE = (
+    '<style id="wceGateStyle">'
+    '.wce-brand-attribution{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;'
+    'gap:6px 10px;padding:12px 16px;border-top:1px solid #e2e5e2;background:#fff;color:#6d746e;font-size:12px}'
+    '.wce-brand-attribution a{color:#576b95;text-decoration:none}'
+    '.wce-brand-dot{width:6px;height:6px;border-radius:50%;background:#07c160}'
+    '</style>\n'
+)
+_ATTRIBUTION_HTML = (
+    '<div id="wceBrandAttribution" class="wce-brand-attribution" data-wce-brand="wce-attr-202607">'
+    '<span class="wce-brand-dot" aria-hidden="true"></span>'
+    '<span>通过 <strong>WeChatDataAnalysis</strong> 导出</span>'
+    '<span>仅用于个人数据备份、迁移与研究，请尊重聊天参与者隐私。</span>'
+    '</div>\n'
+)
+_RUNTIME_WRAP_KEY = [119, 99, 101, 45, 114, 117, 110, 116, 105, 109, 101]
+
+
+def _short_token(export_id: str, tag: str) -> str:
+    return hashlib.sha256(f"{export_id}:{tag}".encode("utf-8")).hexdigest()[:16]
+
+
+def _wrap_runtime_js(source: str) -> str:
+    raw = source.encode("utf-8")
+    xored = bytes(b ^ _RUNTIME_WRAP_KEY[i % len(_RUNTIME_WRAP_KEY)] for i, b in enumerate(raw))
+    b64 = base64.b64encode(xored).decode("ascii")
+    chunks = [b64[i : i + 4096] for i in range(0, len(b64), 4096)]
+    chunks_json = json.dumps(chunks, separators=(",", ":"))
+    key_json = json.dumps(_RUNTIME_WRAP_KEY, separators=(",", ":"))
+    return (
+        f"(()=>{{const _0={chunks_json},_1={key_json};"
+        "let _2=atob(_0.join('')),_3=new Uint8Array(_2.length);"
+        "for(let _4=0;_4<_2.length;_4++)_3[_4]=_2.charCodeAt(_4)^_1[_4%_1.length];"
+        "let _5=(typeof TextDecoder!='undefined'?new TextDecoder('utf-8').decode(_3):String.fromCharCode.apply(null,_3));"
+        "(0,Function)(_5)();}})();\n"
+    )
+
+
+_WRAPPED_RUNTIME_JS: str | None = None
+
+
+def _get_wrapped_runtime_js() -> str:
+    global _WRAPPED_RUNTIME_JS
+    if _WRAPPED_RUNTIME_JS is None:
+        _WRAPPED_RUNTIME_JS = _wrap_runtime_js(RUNTIME_JS_SOURCE)
+    return _WRAPPED_RUNTIME_JS
+
+
+class _PurePythonWceIntegrity:
+    """Pure-Python replacement for the closed-source wce_integrity native extension."""
+
+    @staticmethod
+    def export_css(kind: str) -> str:
+        key = str(kind or "").strip()
+        value = EXPORT_STYLESHEETS.get(key)
+        if not value:
+            raise RuntimeError(f"unsupported export style: {key}")
+        return value
+
+    @staticmethod
+    def asset_paths(export_id: str) -> str:
+        eid = str(export_id or "export").strip() or "export"
+        paths = [
+            f"assets/_wce/c-{_short_token(eid, 'css')}.css",
+            f"assets/_wce/r-{_short_token(eid, 'runtime')}.js",
+            f"assets/_wce/i-{_short_token(eid, 'integrity')}.js",
+        ]
+        return json.dumps(paths, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def integrity_sidecar_paths(export_id: str) -> str:
+        eid = str(export_id or "export").strip() or "export"
+        paths = [
+            f"assets/_wce/m-{_short_token(eid, 'manifest')}.wce",
+            f"assets/_wce/s-{_short_token(eid, 'signature')}.wce",
+        ]
+        return json.dumps(paths, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def runtime_js() -> str:
+        return _get_wrapped_runtime_js()
+
+    @staticmethod
+    def gate_style() -> str:
+        return _GATE_STYLE
+
+    @staticmethod
+    def attribution_html() -> str:
+        return _ATTRIBUTION_HTML
+
+    @staticmethod
+    def integrity_script_tag(src: str) -> str:
+        escaped = html.escape(str(src or "").strip(), quote=True)
+        return f'  <script defer data-wce-integrity-bundle="1" src="{escaped}"></script>\n'
+
+    @staticmethod
+    def page_fragment_js(export_id: str, arc_js: str, page_no: int, fragment_html: str) -> str:
+        num = int(page_no)
+        html_text = str(fragment_html or "")
+        seal = hashlib.sha256(f"{export_id}:{arc_js}:{num}:{html_text}".encode("utf-8")).hexdigest()
+        return (
+            "(() => {\n"
+            f"  const pageNo = {num};\n"
+            f"  const seal = {json.dumps(seal)};\n"
+            f"  const html = {json.dumps(html_text, ensure_ascii=False)};\n"
+            "  try {\n"
+            "    const fn = window.__WCE_PAGE_LOADED__;\n"
+            "    if (typeof fn === 'function') fn(pageNo, html, seal);\n"
+            "    else {\n"
+            "      const q = (window.__WCE_PAGE_QUEUE__ = window.__WCE_PAGE_QUEUE__ || []);\n"
+            "      q.push([pageNo, html, seal]);\n"
+            "    }\n"
+            "  } catch {}\n"
+            "})();\n"
+        )
+
+    @staticmethod
+    def record_bytes(arcname: str, raw: bytes) -> str:
+        data = bytes(raw or b"")
+        entry = {
+            "path": _arcname(arcname),
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+        return json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def record_file(path: str, arcname: str) -> str:
+        target = Path(path)
+        h = hashlib.sha256()
+        size = 0
+        with open(target, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                h.update(chunk)
+        entry = {
+            "path": _arcname(arcname or target.name),
+            "size": size,
+            "sha256": h.hexdigest(),
+        }
+        return json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def seal_export(export_id: str, entries_json: str, html_assets_json: str) -> str:
+        entries = json.loads(entries_json or "[]")
+        html_assets = json.loads(html_assets_json or "{}")
+        manifest_obj = {
+            "v": 1,
+            "exportId": str(export_id or ""),
+            "assets": html_assets,
+            "f": entries,
+        }
+        manifest_canonical = json.dumps(
+            manifest_obj,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        manifest_sha256 = hashlib.sha256(manifest_canonical.encode("utf-8")).hexdigest()
+        bundle_js = (
+            "(()=>{"
+            f"const _p={json.dumps(manifest_obj, ensure_ascii=False, separators=(',', ':'))};"
+            f"const _a={json.dumps(manifest_sha256)};"
+            "const _b='pure-python';"
+            "const _n=['__','WCE','_I'].join('');"
+            "try{Object.defineProperty(window,_n,{value:{p:_p,a:_a,b:_b},configurable:false,writable:false});}"
+            "catch(e){window[_n]={p:_p,a:_a,b:_b};}"
+            "})();\n"
+        )
+        result = {
+            "manifestJson": manifest_canonical,
+            "manifestCanonical": manifest_canonical,
+            "signature": manifest_sha256,
+            "bundle": bundle_js,
+        }
+        return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+
+
+_PURE_PYTHON_INTEGRITY = _PurePythonWceIntegrity()
 
 
 def load_wce_integrity_native() -> Any:
-    module_name = f"{__package__}.native.wce_integrity"
-    existing = sys.modules.get(module_name)
-    if existing is not None:
-        return existing
-
-    repo_root = Path(__file__).resolve().parents[2]
-    explicit_native_path = str(os.environ.get("WCE_INTEGRITY_NATIVE_PATH") or "").strip()
-    explicit_native = Path(explicit_native_path) if explicit_native_path else None
-    candidates = ([explicit_native] if explicit_native is not None else []) + [
-        repo_root / "native" / "wce_integrity" / "target" / "release" / "wce_integrity.dll",
-        repo_root / "native" / "wce_integrity" / "target-next" / "release" / "wce_integrity.dll",
-        repo_root / "native" / "wce_integrity" / "target" / "release" / "libwce_integrity.dylib",
-        repo_root / "native" / "wce_integrity" / "target" / "release" / "libwce_integrity.so",
-        Path(__file__).resolve().parent / "native" / "wce_integrity.pyd",
-        Path(__file__).resolve().parent / "native" / "libwce_integrity.dylib",
-        Path(__file__).resolve().parent / "native" / "libwce_integrity.so",
-    ]
-    architecture = (platform.machine() or "").lower()
-    if architecture in {"arm64", "aarch64"}:
-        candidates.append(
-            Path(__file__).resolve().parent / "native" / "macos" / "arm64" / "libwce_integrity.dylib"
-        )
-    executable_native = None
-    if getattr(sys, "frozen", False):
-        executable_native = Path(sys.executable).resolve().parent / "native"
-        candidates.extend(
-            (
-                executable_native / "wce_integrity.pyd",
-                executable_native / "libwce_integrity.dylib",
-                executable_native / "libwce_integrity.so",
-            )
-        )
-    bundle_root = getattr(sys, "_MEIPASS", None)
-    if bundle_root:
-        bundled_native = Path(bundle_root) / "wechat_decrypt_tool" / "native"
-        candidates.extend(
-            (
-                bundled_native / "wce_integrity.pyd",
-                bundled_native / "libwce_integrity.dylib",
-                bundled_native / "libwce_integrity.so",
-            )
-        )
-    candidates = [path for path in candidates if path.is_file()]
-    # A PyInstaller extraction receives a fresh mtime on every launch. Prefer
-    # the installed external module so a reviewed package update cannot be
-    # shadowed by a stale copy embedded in the frozen backend.
-    candidates.sort(
-        key=lambda path: (
-            path == explicit_native,
-            executable_native is not None and path.parent == executable_native,
-            path.stat().st_mtime_ns,
-        ),
-        reverse=True,
-    )
-    for build_path in candidates:
-        try:
-            loader = importlib.machinery.ExtensionFileLoader(module_name, str(build_path))
-            spec = importlib.util.spec_from_file_location(module_name, build_path, loader=loader)
-            if spec is not None:
-                native = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = native
-                loader.exec_module(native)
-                return native
-        except Exception:
-            sys.modules.pop(module_name, None)
-
-    try:
-        from .native import wce_integrity  # type: ignore
-
-        return wce_integrity
-    except Exception as exc:
-        raise RuntimeError(_NATIVE_ERROR) from exc
+    return _PURE_PYTHON_INTEGRITY
 
 
 def export_css(kind: str) -> str:
     try:
-        value = str(load_wce_integrity_native().export_css(str(kind or "")))
+        value = str(_PURE_PYTHON_INTEGRITY.export_css(str(kind or "")))
     except Exception as exc:
         raise RuntimeError(_NATIVE_ERROR) from exc
     if not value.strip():
@@ -107,7 +213,7 @@ def export_css(kind: str) -> str:
 
 def _native_text(function_name: str, *args: Any) -> str:
     try:
-        value = str(getattr(load_wce_integrity_native(), function_name)(*args))
+        value = str(getattr(_PURE_PYTHON_INTEGRITY, function_name)(*args))
     except Exception as exc:
         raise RuntimeError(_NATIVE_ERROR) from exc
     if not value.strip():
@@ -213,7 +319,7 @@ def _native_entry_bytes(arcname: Any, data: Any) -> dict[str, Any]:
     else:
         raw = bytes(data or b"")
     try:
-        return json.loads(str(load_wce_integrity_native().record_bytes(_arcname(arcname), raw)))
+        return json.loads(str(_PURE_PYTHON_INTEGRITY.record_bytes(_arcname(arcname), raw)))
     except Exception as exc:
         raise RuntimeError("导出完整性组件记录文件失败。") from exc
 
@@ -222,7 +328,7 @@ def native_file_entry(path: Path, arcname: Any = None) -> dict[str, Any]:
     target = Path(path)
     try:
         return json.loads(
-            str(load_wce_integrity_native().record_file(str(target), _arcname(arcname or target.name)))
+            str(_PURE_PYTHON_INTEGRITY.record_file(str(target), _arcname(arcname or target.name)))
         )
     except Exception as exc:
         raise RuntimeError("导出完整性组件记录文件失败。") from exc
@@ -237,7 +343,7 @@ def seal_entries(
     try:
         result = json.loads(
             str(
-                load_wce_integrity_native().seal_export(
+                _PURE_PYTHON_INTEGRITY.seal_export(
                     str(export_id or ""),
                     json.dumps(list(entries), ensure_ascii=False, separators=(",", ":")),
                     json.dumps(dict(html_assets or {}), ensure_ascii=False, separators=(",", ":")),
@@ -253,42 +359,14 @@ def seal_entries(
     ).strip()
     if not manifest_canonical:
         raise RuntimeError("导出完整性组件返回结果为空。")
-    native_seal = seal_export_manifest(
-        str(export_id or ""),
-        manifest_canonical.encode("utf-8"),
-    )
-    result["authoritativeSealFormat"] = native_seal.seal_format
+    result["authoritativeSealFormat"] = "sha256"
     result["nativeManifestCanonical"] = manifest_canonical
-    result["nativeManifestSha256"] = native_seal.manifest_sha256
-    result["nativeEnvelope"] = native_seal.envelope
+    result["nativeManifestSha256"] = hashlib.sha256(manifest_canonical.encode("utf-8")).hexdigest()
     return result
-
-
-def _native_zip_sidecar_paths(manifest_path: str) -> tuple[str, str]:
-    normalized = _arcname(manifest_path)
-    parent = normalized.rsplit("/", 1)[0] if "/" in normalized else "_integrity"
-    return f"{parent}/manifest.json", f"{parent}/signature.wes"
-
-
-def _write_native_zip_sidecars(
-    writer: IntegrityZipWriter,
-    sealed: dict[str, Any],
-    *,
-    manifest_path: str,
-) -> None:
-    envelope = sealed.get("nativeEnvelope")
-    if not isinstance(envelope, (bytes, bytearray, memoryview)):
-        return
-    native_manifest_path, native_signature_path = _native_zip_sidecar_paths(manifest_path)
-    writer.writestr(native_manifest_path, str(sealed.get("nativeManifestCanonical") or ""))
-    writer.writestr(native_signature_path, bytes(envelope))
-    sealed["nativeManifestPath"] = native_manifest_path
-    sealed["nativeSignaturePath"] = native_signature_path
 
 
 class IntegrityZipWriter:
     def __init__(self, archive: zipfile.ZipFile):
-        load_wce_integrity_native()
         self._archive = archive
         self._entries: dict[str, dict[str, Any]] = {}
 
@@ -336,7 +414,6 @@ def write_zip_integrity_sidecars(
     sealed = seal_entries(export_id, writer.integrity_entries(), html_assets=assets)
     writer.writestr(assets["manifestPath"], str(sealed.get("manifestJson") or sealed.get("manifestCanonical") or ""))
     writer.writestr(assets["signaturePath"], str(sealed.get("signature") or "") + "\n")
-    _write_native_zip_sidecars(writer, sealed, manifest_path=assets["manifestPath"])
     return sealed
 
 
@@ -352,7 +429,6 @@ def write_active_html_zip_integrity(
     )
     writer.writestr(assets["signaturePath"], str(sealed.get("signature") or "") + "\n")
     writer.writestr(assets["integrityPath"], str(sealed.get("bundle") or ""))
-    _write_native_zip_sidecars(writer, sealed, manifest_path=assets["manifestPath"])
     return sealed
 
 
@@ -374,14 +450,6 @@ def write_file_integrity_sidecars(path: Path, export_id: str) -> tuple[Path, Pat
         newline="\n",
     )
     signature_path.write_text(str(sealed.get("signature") or "") + "\n", encoding="utf-8", newline="\n")
-    envelope = sealed.get("nativeEnvelope")
-    if isinstance(envelope, (bytes, bytearray, memoryview)):
-        target.with_name(target.name + ".manifest.json").write_text(
-            str(sealed.get("nativeManifestCanonical") or ""),
-            encoding="utf-8",
-            newline="\n",
-        )
-        target.with_name(target.name + ".signature.wes").write_bytes(bytes(envelope))
     return manifest_path, signature_path
 
 
@@ -465,14 +533,11 @@ def write_protected_html_file(path: Path, document: str, export_id: str) -> tupl
     integrity_path = target.with_name(assets["integrityPath"])
     manifest_path = target.with_name(assets["manifestPath"])
     signature_path = target.with_name(assets["signaturePath"])
-    native_manifest_path, native_signature_path = native_file_integrity_sidecar_paths(target)
     candidates = [
         target,
         integrity_path,
         manifest_path,
         signature_path,
-        native_manifest_path,
-        native_signature_path,
     ]
     try:
         target.write_text(protected, encoding="utf-8", newline="\n")
@@ -484,14 +549,6 @@ def write_protected_html_file(path: Path, document: str, export_id: str) -> tupl
             newline="\n",
         )
         signature_path.write_text(str(sealed.get("signature") or "") + "\n", encoding="utf-8", newline="\n")
-        envelope = sealed.get("nativeEnvelope")
-        if isinstance(envelope, (bytes, bytearray, memoryview)):
-            native_manifest_path.write_text(
-                str(sealed.get("nativeManifestCanonical") or ""),
-                encoding="utf-8",
-                newline="\n",
-            )
-            native_signature_path.write_bytes(bytes(envelope))
     except Exception:
         for candidate in candidates:
             try:
@@ -511,7 +568,7 @@ def seal_protected_html_bytes(file_name: str, data: bytes, export_id: str) -> di
     protected, assets = _prepare_inline_protected_html(safe_name, document, export_id)
     protected_bytes = protected.encode("utf-8")
     sealed = seal_entries(export_id, [_native_entry_bytes(safe_name, protected_bytes)], html_assets=assets)
-    response = {
+    return {
         "protectedContentBase64": base64.b64encode(protected_bytes).decode("ascii"),
         "integrityFileName": assets["integrityPath"],
         "integrity": str(sealed.get("bundle") or ""),
@@ -519,19 +576,8 @@ def seal_protected_html_bytes(file_name: str, data: bytes, export_id: str) -> di
         "signatureFileName": assets["signaturePath"],
         "manifest": str(sealed.get("manifestJson") or sealed.get("manifestCanonical") or ""),
         "signature": str(sealed.get("signature") or "") + "\n",
-        "authoritativeSealFormat": str(sealed.get("authoritativeSealFormat") or "legacy"),
+        "authoritativeSealFormat": str(sealed.get("authoritativeSealFormat") or "sha256"),
     }
-    envelope = sealed.get("nativeEnvelope")
-    if isinstance(envelope, (bytes, bytearray, memoryview)):
-        response.update(
-            {
-                "nativeManifestFileName": safe_name + ".manifest.json",
-                "nativeManifest": str(sealed.get("nativeManifestCanonical") or ""),
-                "nativeSignatureFileName": safe_name + ".signature.wes",
-                "nativeSignatureBase64": base64.b64encode(bytes(envelope)).decode("ascii"),
-            }
-        )
-    return response
 
 
 def seal_bytes_artifact(file_name: str, data: bytes, export_id: str) -> dict[str, str]:
@@ -546,21 +592,10 @@ def seal_bytes_artifact(file_name: str, data: bytes, export_id: str) -> dict[str
             "signaturePath": signature_name,
         },
     )
-    response = {
+    return {
         "manifestFileName": manifest_name,
         "signatureFileName": signature_name,
         "manifest": str(sealed.get("manifestJson") or sealed.get("manifestCanonical") or ""),
         "signature": str(sealed.get("signature") or "") + "\n",
-        "authoritativeSealFormat": str(sealed.get("authoritativeSealFormat") or "legacy"),
+        "authoritativeSealFormat": str(sealed.get("authoritativeSealFormat") or "sha256"),
     }
-    envelope = sealed.get("nativeEnvelope")
-    if isinstance(envelope, (bytes, bytearray, memoryview)):
-        response.update(
-            {
-                "nativeManifestFileName": safe_name + ".manifest.json",
-                "nativeManifest": str(sealed.get("nativeManifestCanonical") or ""),
-                "nativeSignatureFileName": safe_name + ".signature.wes",
-                "nativeSignatureBase64": base64.b64encode(bytes(envelope)).decode("ascii"),
-            }
-        )
-    return response

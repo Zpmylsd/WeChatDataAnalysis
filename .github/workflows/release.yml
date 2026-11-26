@@ -49,11 +49,12 @@ jobs:
           npm --prefix desktop run build:backend
 
       - name: Build Windows Setup EXE (electron-builder)
+        working-directory: desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
-          npm --prefix desktop run build:icon
-          npx --prefix desktop electron-builder --win --x64 --publish never
+          npm run build:icon
+          npx electron-builder --win --x64 --publish never
 
       - name: Stage release EXE artifacts
         shell: pwsh

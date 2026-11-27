@@ -105,11 +105,11 @@ class _AccountState:
 
 class ChatRealtimeAutoSyncService:
     def __init__(self) -> None:
-        self._enabled = _env_bool("WECHAT_TOOL_REALTIME_AUTOSYNC", False)
-        self._interval_ms = _env_int("WECHAT_TOOL_REALTIME_AUTOSYNC_INTERVAL_MS", 1000, min_v=200, max_v=10_000)
-        self._debounce_ms = _env_int("WECHAT_TOOL_REALTIME_AUTOSYNC_DEBOUNCE_MS", 600, min_v=0, max_v=10_000)
+        self._enabled = _env_bool("WECHAT_TOOL_REALTIME_AUTOSYNC", True)
+        self._interval_ms = _env_int("WECHAT_TOOL_REALTIME_AUTOSYNC_INTERVAL_MS", 1500, min_v=200, max_v=10_000)
+        self._debounce_ms = _env_int("WECHAT_TOOL_REALTIME_AUTOSYNC_DEBOUNCE_MS", 1000, min_v=0, max_v=10_000)
         self._min_sync_interval_ms = _env_int(
-            "WECHAT_TOOL_REALTIME_AUTOSYNC_MIN_SYNC_INTERVAL_MS", 800, min_v=0, max_v=60_000
+            "WECHAT_TOOL_REALTIME_AUTOSYNC_MIN_SYNC_INTERVAL_MS", 1500, min_v=0, max_v=60_000
         )
         self._workers = _env_int("WECHAT_TOOL_REALTIME_AUTOSYNC_WORKERS", 1, min_v=1, max_v=4)
 

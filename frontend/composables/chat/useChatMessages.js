@@ -2414,7 +2414,7 @@ export const useChatMessages = ({
   }
 
   const applyRealtimeMessage = async (event) => {
-    if (!realtimeEnabled.value || !selectedAccount.value || !selectedContact.value?.username) return false
+    if (!realtimeEnabled.value || !selectedAccount.value) return false
 
     const eventAccount = String(event?.account || '').trim()
     if (eventAccount && eventAccount !== String(selectedAccount.value || '').trim()) return false
@@ -2435,14 +2435,18 @@ export const useChatMessages = ({
       || rawMessage.sessionId
       || ''
     ).trim()
-    const selectedUsername = String(selectedContact.value.username || '').trim()
-    if (!username || username !== selectedUsername) return false
+    if (!username) return false
+
+    const selectedUsername = String(selectedContact.value?.username || '').trim()
+    const isSelected = username === selectedUsername
+    const existing = allMessages.value[username]
+    if (!isSelected && (!Array.isArray(existing) || !existing.length)) return false
 
     const message = rawMessage.username ? rawMessage : { ...rawMessage, username }
-    const existing = allMessages.value[username] || []
-    const container = messageContainerRef.value
+    const baseList = Array.isArray(existing) ? existing : []
+    const container = isSelected ? messageContainerRef.value : null
     const atBottom = !!container && (container.scrollHeight - container.scrollTop - container.clientHeight) < 80
-    const merged = mergeRealtimeMessages(existing, message)
+    const merged = mergeRealtimeMessages(baseList, message)
     if (!merged.changed) return false
 
     allMessages.value = {
@@ -2450,10 +2454,12 @@ export const useChatMessages = ({
       [username]: merged.messages
     }
 
-    await nextTick()
-    const nextContainer = messageContainerRef.value
-    if (nextContainer && atBottom) nextContainer.scrollTop = nextContainer.scrollHeight
-    updateJumpToBottomState()
+    if (isSelected) {
+      await nextTick()
+      const nextContainer = messageContainerRef.value
+      if (nextContainer && atBottom) nextContainer.scrollTop = nextContainer.scrollHeight
+      updateJumpToBottomState()
+    }
     return true
   }
 

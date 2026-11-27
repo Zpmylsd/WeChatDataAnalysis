@@ -85,7 +85,7 @@ jobs:
           $notes = @(
             "## WeChatDataAnalysis（Windows x64 内网自用去限制版）",
             "",
-            "- 已解除 45 天硬过期限制与闭源 `native_core` / `wechatdb_broker.exe` 强绑定，默认使用本地已解密 SQLite（`decrypted` 模式）",
+            "- 已解除 45 天硬过期限制与闭源 `native_core` / `wechatdb_broker.exe` 强绑定，内置纯 Python 页级增量 SQLCipher+WAL 实时读库与自动消息推送（无闭源 DLL、无过期限制、不外联）",
             "- 已移除 `license.fqyw.love` 在线租约校验、4xx 强杀进程与操作遥测上报",
             "- 已移除 `view.free.c3o.re` 图片密钥回退自动上传 `global_config` 逻辑",
             "- 已移除 `wce_integrity.pyd` 与 `.wec`/`.wes` 闭源导出封签加密壳，全部导出纯 Python 化（直接生成标准 HTML/CSS 与标准 ZIP）",

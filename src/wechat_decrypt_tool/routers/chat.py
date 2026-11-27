@@ -703,10 +703,7 @@ def _is_chat_realtime_available(account_dir: Path) -> bool:
 
 
 def _resolve_chat_source_for_account(source_norm: str, account_dir: Path) -> str:
-    if source_norm == "auto" and (
-        account_prefers_decrypted_snapshot(account_dir)
-        or not _is_chat_realtime_available(account_dir)
-    ):
+    if source_norm == "auto" and account_prefers_decrypted_snapshot(account_dir):
         return "decrypted"
     if source_norm == "auto":
         return "realtime"

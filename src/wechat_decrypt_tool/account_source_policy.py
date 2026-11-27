@@ -22,11 +22,9 @@ def load_account_source_metadata(account_dir: Path) -> dict[str, Any]:
 
 def source_metadata_prefers_decrypted_snapshot(value: Any) -> bool:
     if not isinstance(value, dict):
-        return True
-    mode = str(value.get("import_mode") or "").strip().lower()
-    if mode in {"realtime_only", "direct_only"}:
         return False
-    return True
+    mode = str(value.get("import_mode") or "").strip().lower()
+    return mode in _DECRYPTED_SNAPSHOT_IMPORT_MODES
 
 
 def account_prefers_decrypted_snapshot(account_dir: Path) -> bool:
@@ -35,6 +33,9 @@ def account_prefers_decrypted_snapshot(account_dir: Path) -> bool:
         load_account_source_metadata(account_path)
     ):
         return False
+    # Only make the import marker authoritative while the imported snapshot is
+    # still present. A later decrypt can replace _source.json and restore direct
+    # mode without any migration step.
     return (account_path / "session.db").is_file() and (
         account_path / "contact.db"
     ).is_file()

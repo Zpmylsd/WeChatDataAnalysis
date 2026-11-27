@@ -250,8 +250,8 @@ export const useChatRealtimeStore = defineStore('chatRealtime', () => {
 
     closeEventSource()
     const apiBase = useApiBase()
-    const scope = 'all'
-    const url = `${apiBase}/chat/realtime/messages?account=${encodeURIComponent(account)}&interval_ms=5`
+    const scope = normalizeStreamScope(streamScope.value)
+    const url = `${apiBase}/chat/realtime/messages?account=${encodeURIComponent(account)}&interval_ms=250&include_sent=true&scope=${encodeURIComponent(streamScope.value)}`
     const registry = getStreamRegistry()
     const streamKey = getStreamKey(account, scope)
     const registered = registry?.get(streamKey)
@@ -371,7 +371,7 @@ export const useChatRealtimeStore = defineStore('chatRealtime', () => {
     const account = getAccount()
     if (!account) return
     if (typeof EventSource === 'undefined') return
-    const scope = 'all'
+    const scope = normalizeStreamScope(streamScope.value)
     if (
       eventSource
       && eventSourceAccount === account
@@ -384,9 +384,17 @@ export const useChatRealtimeStore = defineStore('chatRealtime', () => {
   }
 
   const enable = async ({ silent = false, scope = streamScope.value } = {}) => {
+    const nextScope = normalizeStreamScope(scope)
     if (toggling.value) return false
+    if (enabled.value && available.value && eventSourceAccount === getAccount()) {
+      if (streamScope.value !== nextScope) {
+        streamScope.value = nextScope
+        startStream()
+      }
+      return true
+    }
     const actionSeq = ++lifecycleSeq
-    streamScope.value = normalizeStreamScope(scope)
+    streamScope.value = nextScope
     toggling.value = true
     try {
       const ok = await ensureReadyAccount()

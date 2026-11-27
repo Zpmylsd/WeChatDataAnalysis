@@ -48,17 +48,17 @@ def _suppress_implicit_test_file_logging() -> None:
 
 @pytest.fixture(autouse=True)
 def _native_core_source_entrypoint_context(monkeypatch: pytest.MonkeyPatch):
-    """Mirror the source entrypoint contract for tests that call services directly."""
+    """Ensure clean realtime handles and test logging isolation per test."""
 
-    monkeypatch.setenv("WECHAT_TOOL_NATIVE_CORE_MODE", "required")
-    monkeypatch.setenv("WECHAT_TOOL_NATIVE_CORE_ALLOW_DEVELOPMENT_BUILD", "1")
+    monkeypatch.setenv("WECHAT_TOOL_NATIVE_CORE_BACKGROUND_PRIME", "0")
+    monkeypatch.setenv("WECHAT_TOOL_REALTIME_AUTOSYNC", "0")
     _suppress_implicit_test_file_logging()
     yield
 
-    from wechat_decrypt_tool import native_core_broker, native_core_dev_lease
-    from wechat_decrypt_tool.native_core_client import close_native_core_client
+    try:
+        from wechat_decrypt_tool import wcdb_realtime
 
-    native_core_broker.stop_native_core_broker(_force=True)
-    close_native_core_client()
-    native_core_dev_lease._cleanup()
+        wcdb_realtime.shutdown()
+    except Exception:
+        pass
     _reset_test_file_logging()

@@ -252,6 +252,22 @@ async def _initial_cursor(
     return max((_message_local_id(item) for item in result.get("messages") or []), default=0)
 
 
+def _session_row_signature(row: Any) -> tuple[int, int, int, str]:
+    if not isinstance(row, dict):
+        return (0, 0, 0, "")
+    local_id = _session_last_local_id(row)
+    try:
+        sort_ts = int(row.get("sort_timestamp") or row.get("sortTimestamp") or 0)
+    except (TypeError, ValueError):
+        sort_ts = 0
+    try:
+        last_ts = int(row.get("last_timestamp") or row.get("lastTimestamp") or 0)
+    except (TypeError, ValueError):
+        last_ts = 0
+    summary = str(row.get("summary") or row.get("last_msg_summary") or "")
+    return (local_id, sort_ts, last_ts, summary)
+
+
 @router.get(
     "/api/chat/realtime/messages",
     summary="实时接收聊天消息（SSE）",
@@ -263,16 +279,19 @@ async def stream_chat_realtime_messages(
     interval_ms: int = _DEFAULT_INTERVAL_MS,
     since_local_id: int = 0,
     include_sent: bool = False,
+    scope: str = "all",
 ):
     """Keep one connection open and emit complete newly received messages.
 
     ``username`` limits the stream to one conversation.  When omitted, the
     native session list is checked and only conversations whose latest local
-    id advanced are queried.  The default cursor is the latest row at connect
-    time, so only messages arriving after the connection are emitted.
+    id or session signature advanced are queried.  The default cursor is the
+    latest row at connect time, so only messages arriving after the connection
+    are emitted.
     """
 
-    interval_ms = int(interval_ms)
+    interval_ms = max(5, min(int(interval_ms), 5000))
+    scope_norm = "chat" if str(scope or "").strip().lower() == "chat" else "all"
     try:
         since_local_id = max(0, int(since_local_id or 0))
     except (TypeError, ValueError):
@@ -295,10 +314,20 @@ async def stream_chat_realtime_messages(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"realtime source unavailable: {exc}") from exc
 
+    def _in_scope(conv_name: str) -> bool:
+        if username_norm:
+            return conv_name == username_norm
+        if scope_norm == "chat" and conv_name.startswith("gh_"):
+            return False
+        return True
+
     async def gen():
+        stream_started_unix = int(time.time())
         cursors: dict[str, int] = {}
+        unverified_zero_cursors: set[str] = set()
         metadata_by_name: dict[str, dict[str, Any]] = {}
         session_rows_by_name: dict[str, dict[str, Any]] = {}
+        session_sigs_by_name: dict[str, tuple[int, int, int, str]] = {}
         if username_norm:
             cursors[username_norm] = await _initial_cursor(
                 request,
@@ -315,14 +344,19 @@ async def stream_chat_realtime_messages(
         else:
             for row in await asyncio.to_thread(_read_native_sessions, connection):
                 name = _session_username(row)
-                if name:
-                    cursors[name] = _session_last_local_id(row)
+                if name and _in_scope(name):
+                    initial_id = _session_last_local_id(row)
+                    cursors[name] = initial_id
+                    if initial_id <= 0:
+                        unverified_zero_cursors.add(name)
                     session_rows_by_name[name] = row
+                    session_sigs_by_name[name] = _session_row_signature(row)
 
         ready = {
             "type": "ready",
             "account": account_name,
             "username": username_norm,
+            "scope": scope_norm,
             "mode": "incoming" if not include_sent else "all",
             "cursor": cursors.get(username_norm) if username_norm else None,
             "conversationCount": len(cursors),
@@ -350,8 +384,10 @@ async def stream_chat_realtime_messages(
                     break
 
                 try:
+                    sig_changed_names: set[str] = set()
                     if username_norm:
                         names = [username_norm]
+                        current_connection = connection
                     else:
                         names = []
                         current_connection = await asyncio.to_thread(
@@ -361,39 +397,61 @@ async def stream_chat_realtime_messages(
                         session_rows_by_name = {}
                         for row in await asyncio.to_thread(_read_native_sessions, current_connection):
                             name = _session_username(row)
-                            if not name:
+                            if not name or not _in_scope(name):
                                 continue
                             session_rows_by_name[name] = row
                             latest = _session_last_local_id(row)
+                            sig = _session_row_signature(row)
+                            prev_sig = session_sigs_by_name.get(name)
+                            session_sigs_by_name[name] = sig
                             if name not in cursors:
                                 cursors[name] = since_local_id
                                 names.append(name)
                             elif latest > int(cursors[name]):
                                 names.append(name)
+                            elif prev_sig is not None and sig != prev_sig:
+                                names.append(name)
+                                sig_changed_names.add(name)
 
                     for name in dict.fromkeys(names):
                         before = int(cursors.get(name, since_local_id))
-                        messages, after = await _new_messages(
-                            request,
-                            account=account_name,
-                            username=name,
-                            cursor=before,
-                            include_sent=bool(include_sent),
-                        )
+                        was_unverified_zero = name in unverified_zero_cursors
+                        try:
+                            messages, after = await _new_messages(
+                                request,
+                                account=account_name,
+                                username=name,
+                                cursor=before,
+                                include_sent=bool(include_sent),
+                            )
+                        except Exception:
+                            if name in sig_changed_names:
+                                messages, after = [], before
+                            else:
+                                raise
+                        if was_unverified_zero:
+                            unverified_zero_cursors.discard(name)
+                            messages = [
+                                m
+                                for m in messages
+                                if int(m.get("createTime") or m.get("create_time") or 0)
+                                >= stream_started_unix - 5
+                            ]
                         cursors[name] = max(before, int(after))
                         metadata = await asyncio.to_thread(
                             _conversation_metadata,
                             account_dir,
-                            current_connection if not username_norm else connection,
+                            current_connection,
                             name,
                             session_row=session_rows_by_name.get(name),
                         )
                         previous_metadata = metadata_by_name.get(name)
                         metadata_by_name[name] = metadata
-                        if (
+                        name_changed = (
                             previous_metadata is not None
                             and previous_metadata.get("conversationName") != metadata.get("conversationName")
-                        ):
+                        )
+                        if name_changed or (not messages and name in sig_changed_names):
                             yield _sse_data(
                                 {
                                     "type": "conversation_updated",

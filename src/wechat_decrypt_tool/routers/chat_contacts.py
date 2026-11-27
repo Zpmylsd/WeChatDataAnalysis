@@ -364,10 +364,7 @@ def _normalize_contacts_source(value: Optional[str]) -> str:
 
 
 def _resolve_contacts_source_for_account(source_norm: str, account_dir: Path) -> str:
-    if source_norm == "auto" and (
-        account_prefers_decrypted_snapshot(account_dir)
-        or (account_dir / "contact.db").is_file()
-    ):
+    if source_norm == "auto" and account_prefers_decrypted_snapshot(account_dir):
         return "decrypted"
     if source_norm == "auto":
         return "realtime"

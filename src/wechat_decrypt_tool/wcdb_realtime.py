@@ -9,41 +9,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, TypeVar
 
+from . import native_core_realtime
 from .key_store import get_account_keys_from_store
 from .logging_config import get_logger
 from .media_helpers import _resolve_account_db_storage_dir
 
 
-class _DisabledNativeCoreRealtime:
-    @staticmethod
-    def is_native_core_handle(_handle: int) -> bool:
-        return False
-
-    @staticmethod
-    def close_all() -> None:
-        return
-
-    @staticmethod
-    def close_account(_handle: int) -> None:
-        return
-
-    def __getattr__(self, name: str) -> Any:
-        def _unavailable(*_args: Any, **_kwargs: Any) -> Any:
-            raise WCDBRealtimeError(f"native_core is disabled ({name}); using local decrypted SQLite mode.")
-        return _unavailable
-
-
-native_core_realtime: Any = _DisabledNativeCoreRealtime()
-
-
 def resolve_native_core_library() -> Path:
-    native_dir = Path(__file__).resolve().parent / "native"
-    return native_dir / ("wechatdb_client.dll" if sys.platform.startswith("win") else "libwechatdb_client.dylib")
+    return Path(__file__).resolve().parent / "native_core_realtime.py"
 
 
 def resolve_native_core_broker() -> Path:
-    native_dir = Path(__file__).resolve().parent / "native"
-    return native_dir / ("wechatdb_broker.exe" if sys.platform.startswith("win") else "wechatdb_broker")
+    return Path(__file__).resolve().parent / "native_core_realtime.py"
 
 
 def stop_native_core_broker(*_args: Any, **_kwargs: Any) -> None:
@@ -110,7 +87,7 @@ def _derive_native_wxid(account: str, db_storage_dir: Optional[Path] = None) -> 
 
 
 def _native_core_mode_value() -> str:
-    return "disabled"
+    return "python"
 
 
 def _is_native_core_handle(handle: int) -> bool:
@@ -498,22 +475,10 @@ class WCDBRealtimeManager:
             errors.append(str(exc))
             native_wxid = _derive_native_wxid(account, db_storage_dir)
 
-        try:
-            client_path = resolve_native_core_library()
-            broker_path = resolve_native_core_broker()
-        except Exception as exc:
-            errors.append(str(exc))
-            native_dir = Path(__file__).resolve().parent / "native"
-            if sys.platform.startswith("win"):
-                client_path = native_dir / "wechatdb_client.dll"
-                broker_path = native_dir / "wechatdb_broker.exe"
-            else:
-                client_path = native_dir / "libwechatdb_client.dylib"
-                broker_path = native_dir / "wechatdb_broker"
-        manifest_path = client_path.with_name("wechatdb_native_build.json")
-        components_present = all(
-            path.is_file() for path in (client_path, broker_path, manifest_path)
-        )
+        client_path = resolve_native_core_library()
+        broker_path = resolve_native_core_broker()
+        manifest_path = client_path
+        components_present = True
         recent_failure = self.get_recent_failure(account)
         return {
             "account": account,
@@ -803,9 +768,9 @@ class WCDBRealtimeManager:
 
     def start_background_prime(self) -> None:
         enabled = str(
-            os.environ.get("WECHAT_TOOL_NATIVE_CORE_BACKGROUND_PRIME", "0") or ""
+            os.environ.get("WECHAT_TOOL_NATIVE_CORE_BACKGROUND_PRIME", "1") or ""
         ).strip().lower()
-        if enabled in {"", "0", "false", "no", "off"}:
+        if enabled in {"0", "false", "no", "off"}:
             return
         with self._mu:
             if self._prime_thread is not None and self._prime_thread.is_alive():
